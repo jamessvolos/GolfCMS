@@ -1,0 +1,214 @@
+/**
+ * Every tunable number in the engine lives here.
+ * These are reasonable placeholders seeded from the product spec — tune freely.
+ */
+
+import type { ClubId, FeatureKind, LandingLie, PlayableLie, ShotShape } from './types';
+
+// ---------------------------------------------------------------------------
+// Club distances
+// ---------------------------------------------------------------------------
+
+/** Driver carry (yards) ≈ this × club speed (mph). 110 mph ≈ 270y. */
+export const DRIVER_CARRY_PER_MPH = 2.45;
+
+/** Fixed gapping as fractions of driver carry, longest first. */
+export const CLUB_GAPPING: { id: ClubId; label: string; fraction: number }[] = [
+  { id: 'DR', label: 'Driver', fraction: 1.0 },
+  { id: 'W3', label: '3 wood', fraction: 0.93 },
+  { id: 'W5', label: '5 wood', fraction: 0.87 },
+  { id: 'I4', label: '4 iron', fraction: 0.82 },
+  { id: 'I5', label: '5 iron', fraction: 0.78 },
+  { id: 'I6', label: '6 iron', fraction: 0.74 },
+  { id: 'I7', label: '7 iron', fraction: 0.7 },
+  { id: 'I8', label: '8 iron', fraction: 0.65 },
+  { id: 'I9', label: '9 iron', fraction: 0.6 },
+  { id: 'PW', label: 'Pitching wedge', fraction: 0.55 },
+  { id: 'GW', label: 'Gap wedge', fraction: 0.48 },
+  { id: 'SW', label: 'Sand wedge', fraction: 0.42 },
+  { id: 'LW', label: 'Lob wedge', fraction: 0.35 },
+];
+
+/** Clubs excluded per lie. Sand allows wedges only; rough bans the big sticks. */
+export const LIE_CLUB_CAPS: Record<PlayableLie, ClubId[]> = {
+  tee: [],
+  fairway: [],
+  rough: ['DR', 'W3'],
+  sand: ['DR', 'W3', 'W5', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9'],
+  recovery: ['DR', 'W3', 'W5', 'I4', 'I5', 'I6'],
+};
+
+// ---------------------------------------------------------------------------
+// Dispersion model
+// ---------------------------------------------------------------------------
+
+/** Longitudinal (distance) sigma as a fraction of shot distance. */
+export const LONG_SIGMA_FRACTION = 0.055;
+
+/**
+ * Lateral sigma as a fraction of shot distance, by handicap.
+ * Linear interpolation between anchors; linear extrapolation beyond,
+ * clamped to [first, LATERAL_SIGMA_MAX_FRACTION].
+ */
+export const LATERAL_SIGMA_BY_HANDICAP: [handicap: number, fraction: number][] = [
+  [0, 0.032],
+  [5, 0.038],
+  [10, 0.046],
+  [15, 0.055],
+  [20, 0.065],
+];
+
+export const LATERAL_SIGMA_MAX_FRACTION = 0.09;
+
+/**
+ * Shot-shape bias of the lateral MEAN, as a signed fraction of shot distance.
+ * Positive = right of the aim line (right-handed player). The player aims at
+ * their pin; the distribution is biased by their shape — intentional.
+ */
+export const SHAPE_BIAS_FRACTION: Record<ShotShape, number> = {
+  draw: -0.008,
+  straight: 0,
+  fade: 0.008,
+};
+
+/** Multipliers applied to BOTH sigmas when playing from these lies. */
+export const LIE_SIGMA_MULTIPLIER: Record<PlayableLie, number> = {
+  tee: 1,
+  fairway: 1,
+  rough: 1.25,
+  sand: 1.5,
+  recovery: 1.4,
+};
+
+// ---------------------------------------------------------------------------
+// Expected-strokes baseline (Broadie-style)
+// ---------------------------------------------------------------------------
+
+/** Distance anchors (yards) for the off-green baseline table. */
+export const BASELINE_DISTANCES = [25, 50, 100, 150, 200, 250, 300, 400] as const;
+
+/**
+ * Expected strokes to hole out by lie, at the anchor distances above.
+ * null = undefined in the source table (interpolate/extrapolate handles it).
+ */
+export const BASELINE_TABLE: Record<
+  'tee' | 'fairway' | 'rough' | 'sand' | 'recovery',
+  (number | null)[]
+> = {
+  tee: [null, null, null, 2.95, 3.15, 3.4, 3.65, 3.95],
+  fairway: [2.4, 2.65, 2.8, 2.98, 3.19, 3.45, 3.7, 4.05],
+  rough: [2.55, 2.85, 3.05, 3.25, 3.5, 3.8, 4.1, 4.4],
+  sand: [2.85, 3.15, 3.35, 3.6, 3.9, 4.2, null, null],
+  recovery: [3.4, 3.65, 3.85, 4.05, 4.3, 4.6, null, null],
+};
+
+/** Expected strokes can never drop below this off the green. */
+export const BASELINE_FLOOR = 1.5;
+
+/** Putting: [distance in feet, expected putts]. Interpolated. */
+export const PUTT_TABLE: [feet: number, putts: number][] = [
+  [2, 1.0],
+  [4, 1.15],
+  [8, 1.5],
+  [20, 1.87],
+  [35, 2.1],
+  [55, 2.3],
+];
+
+/** Expected putts are clamped to [1, this] after interpolation/extrapolation. */
+export const PUTT_MAX = 3.0;
+
+/** Baseline multiplier = 1 + this × handicap. Applied to all baseline values. */
+export const HANDICAP_MULTIPLIER_PER_STROKE = 0.011;
+
+// ---------------------------------------------------------------------------
+// Hazard cost model
+// ---------------------------------------------------------------------------
+
+/** Penalty strokes added for a ball in the water (plus the shot itself). */
+export const WATER_PENALTY = 1;
+
+/** Drop point offset back toward the ball from the water entry point, yards. */
+export const WATER_DROP_OFFSET_YDS = 5;
+
+/**
+ * OB is stroke-and-distance approximated without recursion:
+ * cost = 2 + baseline(originalDistanceToPin, originalLie).
+ */
+export const OB_EXTRA_STROKES = 2;
+
+// ---------------------------------------------------------------------------
+// Monte Carlo & optimization grid
+// ---------------------------------------------------------------------------
+
+/** Landing samples per aim-point evaluation. */
+export const MC_SAMPLES = 600;
+
+/** Deterministic default seed; callers may override. */
+export const DEFAULT_SEED = 0x5eed;
+
+/** Candidate grid spacing, yards. */
+export const GRID_SPACING_YDS = 6;
+
+/** Search radius = max-club carry × this. */
+export const GRID_REACH_FACTOR = 1.15;
+
+/** Half-angle of the search sector around the ball→pin bearing, degrees. */
+export const GRID_SECTOR_HALF_ANGLE_DEG = 50;
+
+/** Don't search beyond pin distance + this margin (yards). */
+export const GRID_BEYOND_PIN_MARGIN_YDS = 40;
+
+/** Minimum search radius (yards) so short shots still get a grid. */
+export const GRID_MIN_RADIUS_YDS = 15;
+
+/**
+ * Lie classification priority when polygons overlap (first match wins).
+ * Anything inside no polygon is rough.
+ */
+export const CLASSIFY_PRIORITY: FeatureKind[] = [
+  'ob',
+  'water',
+  'green',
+  'bunker',
+  'recovery',
+  'fairway',
+];
+
+export const KIND_TO_LIE: Record<FeatureKind, LandingLie> = {
+  ob: 'ob',
+  water: 'water',
+  green: 'green',
+  bunker: 'sand',
+  recovery: 'recovery',
+  fairway: 'fairway',
+};
+
+// ---------------------------------------------------------------------------
+// Scoring bands, Elo, puzzle ratings
+// ---------------------------------------------------------------------------
+
+/** sgLoss thresholds (inclusive) → band + Elo score. Order matters. */
+export const SCORE_BANDS: { maxSgLoss: number; band: 'perfect' | 'good' | 'okay'; eloScore: number }[] = [
+  { maxSgLoss: 0.03, band: 'perfect', eloScore: 1.0 },
+  { maxSgLoss: 0.1, band: 'good', eloScore: 0.5 },
+  { maxSgLoss: 0.25, band: 'okay', eloScore: 0.25 },
+];
+
+export const MISS_ELO_SCORE = 0;
+
+export const ELO_K_PLAYER = 24;
+export const ELO_K_PUZZLE = 16;
+export const ELO_INITIAL_PLAYER = 1200;
+
+/** Puzzle rating seed: 1000 + 1500 × clamp(trapSize / 0.5, 0, 1). */
+export const PUZZLE_RATING_BASE = 1000;
+export const PUZZLE_RATING_SPAN = 1500;
+export const PUZZLE_RATING_TRAP_REF = 0.5;
+
+// ---------------------------------------------------------------------------
+// Profile bucketing (heatmap cache key)
+// ---------------------------------------------------------------------------
+
+export const BUCKET_HANDICAP_STEP = 5;
+export const BUCKET_SPEED_STEP = 10;
