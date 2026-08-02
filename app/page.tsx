@@ -23,7 +23,7 @@ export default async function Home() {
       </header>
 
       <section className="mt-10">
-        <div className="stat-caption">Today&rsquo;s plates</div>
+        <div className="stat-caption">The folio</div>
         {puzzles.length === 0 ? (
           <div className="mt-3 rounded-folio border border-hairline bg-paper px-5 py-6">
             <p className="text-[14.5px]">No holes in the folio yet.</p>
@@ -33,24 +33,52 @@ export default async function Home() {
           </div>
         ) : (
           <div className="mt-3 grid gap-3">
-            {puzzles.map(({ puzzle, hole }, i) => (
-              <Link
-                key={puzzle.id}
-                href={`/puzzle/${puzzle.id}`}
-                className="group rounded-folio border border-hairline bg-paper px-5 py-4 transition-colors hover:border-ink"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="font-display text-[22px]">
-                    {i === 0 ? 'Plate I' : 'Plate II'} — {hole.courseName} No. {hole.holeNumber}
-                  </span>
-                  <span className="mono-nums text-[12px] text-ink-soft">
-                    par {hole.par} · {hole.yardage}y · {puzzle.category.toUpperCase()} · rating{' '}
-                    {puzzle.rating}
-                  </span>
+            {Array.from(
+              puzzles
+                .reduce((m, entry) => {
+                  const list = m.get(entry.hole.id) ?? [];
+                  list.push(entry);
+                  m.set(entry.hole.id, list);
+                  return m;
+                }, new Map<string, typeof puzzles>())
+                .values(),
+            ).map((group) => {
+              const hole = group[0]!.hole;
+              return (
+                <div
+                  key={hole.id}
+                  className="rounded-folio border border-hairline bg-paper px-5 py-4"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-display text-[21px]">
+                      {hole.courseName} · No. {hole.holeNumber}
+                    </span>
+                    <span className="mono-nums text-[12px] text-ink-soft">
+                      par {hole.par} · {hole.yardage}y
+                    </span>
+                  </div>
+                  <div className="mt-2 grid gap-1.5">
+                    {group.map(({ puzzle }) => (
+                      <Link
+                        key={puzzle.id}
+                        href={`/puzzle/${puzzle.id}`}
+                        className="group flex flex-wrap items-baseline justify-between gap-2 rounded-folio border border-transparent px-2 py-1.5 transition-colors hover:border-hairline hover:bg-[var(--sg-paper-edge)]"
+                      >
+                        <span className="text-[14px]">
+                          <span className="folio-label mr-2 text-[12.5px] text-ink-soft">
+                            {puzzle.category.toUpperCase()}
+                          </span>
+                          {puzzle.description}
+                        </span>
+                        <span className="mono-nums text-[11.5px] text-ink-soft">
+                          rating {puzzle.rating}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
-                <p className="mt-1 text-[14px] text-ink-soft">{puzzle.description}</p>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

@@ -67,6 +67,27 @@ describe('classifyPoint', () => {
     expect(classifyPoint(prepared, { x: 10, y: 200 })).toBe('water');
   });
 
+  it('prefers green over water (island greens)', () => {
+    const island = prepareHole(
+      holeFromYardSpec({
+        id: 'island',
+        courseName: 'Test',
+        holeNumber: 17,
+        par: 3,
+        yardage: 130,
+        origin: ORIGIN,
+        polygons: [
+          { kind: 'water', ring: [[-80, 60], [80, 60], [80, 220], [-80, 220]] },
+          { kind: 'green', ring: circleRing(0, 140, 12) },
+        ],
+        pin: [0, 140],
+        tees: [[0, 0]],
+      }),
+    );
+    expect(classifyPoint(island, { x: 0, y: 140 })).toBe('green');
+    expect(classifyPoint(island, { x: 40, y: 140 })).toBe('water');
+  });
+
   it('prefers green over fairway', () => {
     expect(classifyPoint(prepared, { x: 0, y: 380 })).toBe('green');
   });

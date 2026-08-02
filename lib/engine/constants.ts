@@ -171,12 +171,14 @@ export const GRID_MIN_REACH_YDS = 24;
 
 /**
  * Lie classification priority when polygons overlap (first match wins).
- * Anything inside no polygon is rough.
+ * Anything inside no polygon is rough. Green outranks water so island
+ * greens annotate naturally: a big water polygon under a green polygon
+ * classifies the island as green, not water.
  */
 export const CLASSIFY_PRIORITY: FeatureKind[] = [
   'ob',
-  'water',
   'green',
+  'water',
   'bunker',
   'recovery',
   'fairway',

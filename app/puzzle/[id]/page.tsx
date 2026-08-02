@@ -31,7 +31,7 @@ export default async function PuzzlePage({ params }: { params: Promise<{ id: str
           </span>
         </div>
         <h1 className="mt-1 font-display text-[clamp(24px,4.5vw,34px)] leading-tight">
-          No. {hole.holeNumber} · &ldquo;The Cape&rdquo; · {hole.yardage}y
+          No. {hole.holeNumber} · {hole.courseName} · {hole.yardage}y
         </h1>
         <hr className="rule-engraved mt-3" />
       </header>

@@ -19,7 +19,7 @@ export const ESRI_ATTRIBUTION =
  * NEXT_PUBLIC_TILE_PROXY=1 at build time routes tiles through the
  * same-origin relay at /api/tiles (see app/api/tiles/.../route.ts).
  */
-const TILE_URL =
+export const TILE_URL =
   process.env.NEXT_PUBLIC_TILE_PROXY === '1'
     ? '/api/tiles/{z}/{y}/{x}'
     : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';

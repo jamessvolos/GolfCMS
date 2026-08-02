@@ -1,89 +1,69 @@
 /**
- * Seed the dev database: the single local profile, the cape hole and its
- * puzzles (ratings seeded from trap size per the spec), and a warm heatmap
- * cache entry for the default profile bucket.
+ * Seed the dev database through the same ingestion pipeline the annotate
+ * studio uses: the single local profile plus the cape fixture hole with
+ * its puzzles (ratings from trap size, warm heatmap cache).
  *
  *   npm run db:seed
  */
 
 import { getHole, listPuzzles } from '@/lib/content/holes';
-import { prepareHole } from '@/lib/engine/hole';
-import { bucketedProfile, profileBucket, SEED_PROFILE } from '@/lib/engine/profile';
-import { puzzleRatingFromTrap } from '@/lib/engine/scoring';
-import { computeGridSummary } from '@/lib/puzzle/gridSummary';
+import { ingestHole } from '@/lib/server/ingestHole';
+import type { IngestInput } from '@/lib/server/ingestHole';
 import { db } from '@/lib/server/db';
 
-async function main() {
-  await db.profile.upsert({ where: { id: 'local' }, create: { id: 'local' }, update: {} });
-
+function capeAsIngest(): IngestInput {
   const hole = getHole();
-  await db.hole.upsert({
-    where: { id: hole.id },
-    create: {
+  const polygons: IngestInput['hole']['polygons'] = [];
+  const tees: { lon: number; lat: number }[] = [];
+  let pin: { lon: number; lat: number } | null = null;
+
+  for (const f of hole.geojson.features) {
+    if (f.geometry.type === 'Polygon') {
+      polygons.push({
+        kind: f.properties.kind as IngestInput['hole']['polygons'][number]['kind'],
+        name: f.properties.name,
+        ring: f.geometry.coordinates[0]!.map(([lon, lat]) => [lon, lat] as [number, number]),
+      });
+    } else if (f.properties.kind === 'pin') {
+      const [lon, lat] = f.geometry.coordinates;
+      pin = { lon, lat };
+    } else {
+      const [lon, lat] = f.geometry.coordinates;
+      tees.push({ lon, lat });
+    }
+  }
+  if (!pin) throw new Error('cape fixture has no pin');
+
+  return {
+    hole: {
       id: hole.id,
       courseName: hole.courseName,
       holeNumber: hole.holeNumber,
       par: hole.par,
       yardage: hole.yardage,
-      geojson: JSON.stringify(hole.geojson),
-      imageryCenter: JSON.stringify(hole.imageryCenter),
+      imageryCenter: hole.imageryCenter,
+      polygons,
+      pin,
+      tees,
     },
-    update: {
-      courseName: hole.courseName,
-      holeNumber: hole.holeNumber,
-      par: hole.par,
-      yardage: hole.yardage,
-      geojson: JSON.stringify(hole.geojson),
-      imageryCenter: JSON.stringify(hole.imageryCenter),
-    },
-  });
+    puzzles: listPuzzles().map((p) => ({
+      id: p.id,
+      ball: p.ballPosition,
+      pin: p.pinPosition,
+      lie: p.lie,
+      category: p.category,
+      description: p.description,
+    })),
+  };
+}
 
-  const prepared = prepareHole(hole);
-  const seedBucketProfile = bucketedProfile(SEED_PROFILE);
-  const bucket = profileBucket(SEED_PROFILE);
-
-  for (const puzzle of listPuzzles()) {
-    const sit = {
-      ball: prepared.toLocal(puzzle.ballPosition),
-      pin: prepared.toLocal(puzzle.pinPosition),
-      lie: puzzle.lie,
-    };
-    const summary = computeGridSummary(prepared, sit, seedBucketProfile, puzzle.category);
-    const rating = puzzleRatingFromTrap(summary.trapSize);
-
-    const data = {
-      holeId: hole.id,
-      ballPosition: JSON.stringify(puzzle.ballPosition),
-      pinPosition: JSON.stringify(puzzle.pinPosition),
-      lie: puzzle.lie,
-      category: puzzle.category,
-      description: puzzle.description,
-      rating,
-      trapSize: summary.trapSize,
-    };
-    await db.puzzle.upsert({
-      where: { id: puzzle.id },
-      create: { id: puzzle.id, ...data },
-      update: data,
-    });
-
-    // Geometry may have changed: stale grids must not survive a re-seed.
-    await db.heatmapCache.deleteMany({ where: { puzzleId: puzzle.id } });
-    await db.heatmapCache.create({
-      data: {
-        puzzleId: puzzle.id,
-        profileBucket: bucket,
-        grid: JSON.stringify(summary),
-        optimalAim: JSON.stringify(summary.optimal.lonlat),
-        optimalE: summary.optimal.e,
-      },
-    });
-
-    console.log(
-      `seeded ${puzzle.id}: trap ${summary.trapSize.toFixed(3)} → rating ${rating}, ` +
-        `warm cache for ${bucket}`,
-    );
+async function main() {
+  await db.profile.upsert({ where: { id: 'local' }, create: { id: 'local' }, update: {} });
+  const result = await ingestHole(capeAsIngest());
+  for (const p of result.puzzles) {
+    console.log(`seeded ${p.id}: trap ${p.trapSize.toFixed(3)} → rating ${p.rating}`);
   }
+  for (const w of result.warnings) console.log(`warning: ${w}`);
 }
 
 main()
