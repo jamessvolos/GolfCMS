@@ -391,6 +391,31 @@ export default function PuzzleScreen({
         attemptPromise,
       ]);
     } catch {
+      // The attempt POST may have committed even though the local engine
+      // failed — never discard a recorded score (a retry would double-rate).
+      // attemptPromise maps its own failures to null, so this await is safe.
+      const recorded = await attemptPromise;
+      if (recorded) {
+        attemptRecordedRef.current = true;
+        const aimLocal = proj.toLocal(aim);
+        const sel = selectClub(evalProfile, puzzle.lie, Math.max(0.5, dist(ballLocal, aimLocal)));
+        const degraded: Outcome = {
+          sgLoss: recorded.sgLoss,
+          band: recorded.band,
+          playerE: recorded.playerE,
+          optimalE: recorded.optimalE,
+          playerClub: sel.club.label,
+          optimalClub: '—',
+          eloDelta: recorded.eloDelta,
+          newRating: recorded.newRating,
+          puzzleRating: recorded.puzzleRating,
+          practice: false,
+          recorded: true,
+        };
+        setOutcome(degraded);
+        finishReveal(degraded);
+        return;
+      }
       wrapRef.current?.classList.remove('sg-dimmed');
       setPhase('error');
       return;
@@ -489,7 +514,7 @@ export default function PuzzleScreen({
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
-  }, [ballLocal, finishReveal, evalProfile, profile.elo, puzzle, redraw, setPhase, sitWire]);
+  }, [ballLocal, finishReveal, evalProfile, profile.elo, proj, puzzle, redraw, setPhase, sitWire]);
 
   const skip = useCallback(() => {
     if (phaseRef.current === 'plotting' || phaseRef.current === 'reveal') {

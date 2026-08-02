@@ -11,7 +11,7 @@ import { saveProfileAction } from '@/lib/server/actions';
 import type { ProfileFormState } from '@/lib/server/actions';
 import { DRIVER_CARRY_PER_MPH } from '@/lib/engine/constants';
 import { lateralSigmaFraction } from '@/lib/engine/dispersion';
-import { profileBucket } from '@/lib/engine/profile';
+import { bucketedProfile, profileBucket } from '@/lib/engine/profile';
 import type { ProfileRecord } from '@/lib/server/content';
 import type { ShotShape } from '@/lib/engine/types';
 
@@ -26,13 +26,21 @@ export default function SettingsForm({ profile }: { profile: ProfileRecord }) {
     saveProfileAction,
     { error: null },
   );
-  const [handicap, setHandicap] = useState(profile.handicap);
-  const [clubSpeed, setClubSpeed] = useState(profile.clubSpeedMph);
+  // String state so partially-typed values ('', '-', '12.') aren't clobbered
+  // by a numeric round-trip; the readouts parse with a validity guard.
+  const [handicap, setHandicap] = useState(String(profile.handicap));
+  const [clubSpeed, setClubSpeed] = useState(String(profile.clubSpeedMph));
   const [shotShape, setShotShape] = useState<ShotShape>(profile.shotShape);
 
-  const carry = Math.round(DRIVER_CARRY_PER_MPH * clubSpeed);
-  const spread = Math.round(lateralSigmaFraction(handicap) * carry * 2);
-  const bucket = profileBucket({ handicap, clubSpeedMph: clubSpeed, shotShape });
+  const hNum = Number(handicap);
+  const sNum = Number(clubSpeed);
+  const valid = handicap !== '' && clubSpeed !== '' && Number.isFinite(hNum) && Number.isFinite(sNum);
+  // The readouts show what the ENGINE will use — the bucketed profile the
+  // cached grids and scoring actually run with, not the raw inputs.
+  const bp = valid ? bucketedProfile({ handicap: hNum, clubSpeedMph: sNum, shotShape }) : null;
+  const carry = bp ? Math.round(DRIVER_CARRY_PER_MPH * bp.clubSpeedMph) : null;
+  const spread = bp && carry ? Math.round(lateralSigmaFraction(bp.handicap) * carry) : null;
+  const bucket = bp ? profileBucket(bp) : null;
 
   return (
     <form action={formAction} className="mt-8">
@@ -56,9 +64,9 @@ export default function SettingsForm({ profile }: { profile: ProfileRecord }) {
             type="number"
             min={-5}
             max={36}
-            step={0.5}
+            step="any"
             value={handicap}
-            onChange={(e) => setHandicap(Number(e.target.value))}
+            onChange={(e) => setHandicap(e.target.value)}
             required
             className="mono-nums mt-1 w-full rounded-folio border border-hairline bg-paper px-3 py-2.5 text-[15px]"
           />
@@ -76,7 +84,7 @@ export default function SettingsForm({ profile }: { profile: ProfileRecord }) {
             max={135}
             step={1}
             value={clubSpeed}
-            onChange={(e) => setClubSpeed(Number(e.target.value))}
+            onChange={(e) => setClubSpeed(e.target.value)}
             required
             className="mono-nums mt-1 w-full rounded-folio border border-hairline bg-paper px-3 py-2.5 text-[15px]"
           />
@@ -122,9 +130,9 @@ export default function SettingsForm({ profile }: { profile: ProfileRecord }) {
       <div className="mt-8 rounded-folio border border-hairline bg-[var(--sg-paper-edge)] px-5 py-4">
         <div className="stat-caption">What the engine sees</div>
         <div className="mono-nums mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-[13.5px] sm:grid-cols-3">
-          <span>driver carry ≈ {carry}y</span>
-          <span>±1σ at driver ≈ {spread / 2}y</span>
-          <span>scoring bucket {bucket}</span>
+          <span>driver carry ≈ {carry ?? '—'}y</span>
+          <span>±1σ at driver ≈ {spread ?? '—'}y</span>
+          <span>scoring bucket {bucket ?? '—'}</span>
         </div>
         <p className="mt-2 text-[12px] text-ink-soft">
           Grids are cached per bucket — handicap rounds to 5s, speed to 10s — so your aim is

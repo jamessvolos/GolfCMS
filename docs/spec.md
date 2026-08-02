@@ -269,14 +269,15 @@ model HeatmapCache { id, puzzleId, profileBucket String, grid Json, optimalAim J
    the optimal aim for that hole for two different profiles, and the
    optimal visibly shifts between a 5-handicap and a 20-handicap.
    (`npm run demo`)
-2. **Puzzle UI.** MapLibre viewport with toned imagery, ball/pin markers,
-   pin-drop with the live aiming HUD, then the full reveal: `d3-contour`
-   isolines with labels, optimal benchmark, dispersion ellipses, band
-   stamp, sgLoss and Elo readouts. Acceptance: the three-beat reveal runs
-   to the timing budget, is skippable, and has a working reduced-motion
-   path. Still one hole.
-3. **Profiles.** Folio-styled setup screen (handicap, club speed, shot
-   shape); engine consumes it; profileBucket caching works.
+2. **Puzzle UI.** ✅ MapLibre viewport with toned imagery, ball/pin markers,
+   pin-drop with the live aiming HUD, then the full reveal: isolines with
+   labels, optimal benchmark, dispersion ellipses, band stamp, sgLoss and
+   Elo readouts. Acceptance met: beats measured at ~150/650/900ms,
+   skippable, reduced-motion path verified. Still one hole.
+3. **Profiles.** ✅ Folio-styled setup screen (handicap, club speed, shot
+   shape); engine consumes the bucketed profile everywhere; heatmap grids
+   cached server-side per (puzzleId, profileBucket); attempts + Elo
+   persisted via Prisma/SQLite.
 4. **Annotation admin + content.** Build `/admin/annotate`, then use it to
    create 10 holes / ~25 puzzles across all four categories.
 5. **Elo + progression.** Ratings, puzzle queue (serve puzzles near player

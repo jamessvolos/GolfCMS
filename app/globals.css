@@ -72,6 +72,13 @@ body {
     font-family: var(--sg-font-mono);
     font-variant-numeric: tabular-nums;
   }
+
+  /* sr-only inputs clip their own focus outline — surface it on the
+     wrapping label instead (same ring as the global :focus-visible). */
+  label:has(> input.sr-only:focus-visible) {
+    outline: 2px solid var(--sg-flag);
+    outline-offset: 2px;
+  }
 }
 
 /* Numerals are mono, tabular, everywhere a number appears. */
