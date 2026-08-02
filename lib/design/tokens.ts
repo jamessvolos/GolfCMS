@@ -12,6 +12,12 @@ export const color = {
   fairway: '#2F5233',
   flag: '#B5342A',
   brass: '#9C7A2E',
+  /**
+   * Brass for TEXT on paper surfaces: #9C7A2E only hits 3.4:1 on paper, so
+   * captions/eyebrows use this darker step (5.5:1 on paper, 4.8:1 on
+   * paperEdge). Keep bright brass for the dark viewport and decoration.
+   */
+  brassText: '#755A1F',
   viewport: '#101511',
   hairline: '#C9C0AC',
   /** Isoline ink drawn over imagery. */
@@ -103,6 +109,7 @@ export function cssVars(): string {
     ['--sg-fairway', color.fairway],
     ['--sg-flag', color.flag],
     ['--sg-brass', color.brass],
+    ['--sg-brass-text', color.brassText],
     ['--sg-viewport', color.viewport],
     ['--sg-hairline', color.hairline],
     ['--sg-contour-ink', color.contourInk],

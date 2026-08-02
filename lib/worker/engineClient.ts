@@ -24,6 +24,15 @@ export class EngineClient {
       if (msg.type === 'error') p.reject(new Error(msg.message));
       else p.resolve(msg as never);
     };
+    // A worker that fails to boot (bad chunk, top-level throw) never posts a
+    // message — reject everything in flight so callers can show an error.
+    this.worker.onerror = (ev) => this.rejectAll(new Error(ev.message || 'engine worker crashed'));
+    this.worker.onmessageerror = () => this.rejectAll(new Error('engine worker message error'));
+  }
+
+  private rejectAll(err: Error): void {
+    for (const p of this.pending.values()) p.reject(err);
+    this.pending.clear();
   }
 
   private send<T>(req: Omit<WorkerRequest, 'id'>): Promise<T> {
@@ -68,6 +77,6 @@ export class EngineClient {
 
   dispose(): void {
     this.worker.terminate();
-    this.pending.clear();
+    this.rejectAll(new Error('engine client disposed'));
   }
 }

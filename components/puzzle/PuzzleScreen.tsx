@@ -71,6 +71,7 @@ export default function PuzzleScreen({
     () => ({ ball: puzzle.ballPosition, pin: puzzle.pinPosition, lie: puzzle.lie }),
     [puzzle],
   );
+  const maxReach = Math.round(maxCarry(profile, puzzle.lie));
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
@@ -88,6 +89,8 @@ export default function PuzzleScreen({
   const eloAppliedRef = useRef(false);
   const aimRef = useRef<LonLat | null>(null);
   const phaseRef = useRef<Phase>('boot');
+  /** Places or moves the aim pin; wired up once the map exists. */
+  const setAimRef = useRef<((lonlat: LonLat) => void) | null>(null);
 
   const [phase, setPhaseState] = useState<Phase>('boot');
   const [gridReady, setGridReady] = useState(false);
@@ -197,7 +200,8 @@ export default function PuzzleScreen({
       });
       map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
       map.touchZoomRotate.disableRotation();
-      map.keyboard.disableRotation();
+      // Arrow keys belong to the aim pin (keyboard aiming), not map panning.
+      map.keyboard.disable();
       mapRef.current = map;
       (window as never as { __sgMap: unknown }).__sgMap = map;
 
@@ -242,9 +246,8 @@ export default function PuzzleScreen({
         .setLngLat([puzzle.pinPosition.lon, puzzle.pinPosition.lat])
         .addTo(map);
 
-      map.on('click', (ev) => {
+      const setAim = (lonlat: LonLat) => {
         if (phaseRef.current !== 'aiming') return;
-        const lonlat = { lon: ev.lngLat.lng, lat: ev.lngLat.lat };
         aimRef.current = lonlat;
         if (!aimMarkerRef.current) {
           const el = mkEl(
@@ -264,6 +267,11 @@ export default function PuzzleScreen({
           aimMarkerRef.current.setLngLat([lonlat.lon, lonlat.lat]);
         }
         updateHud(lonlat);
+      };
+      setAimRef.current = setAim;
+
+      map.on('click', (ev) => {
+        setAim({ lon: ev.lngLat.lng, lat: ev.lngLat.lat });
       });
 
       map.on('move', () => {
@@ -466,7 +474,15 @@ export default function PuzzleScreen({
     redraw();
   }, [redraw, setPhase, updateHud]);
 
+  // Keyboard path: arrows place and nudge the aim pin, Enter confirms,
+  // activation keys skip the reveal. Tab is never intercepted.
   useEffect(() => {
+    const ARROWS: Record<string, [number, number]> = {
+      ArrowUp: [0, 1],
+      ArrowDown: [0, -1],
+      ArrowRight: [1, 0],
+      ArrowLeft: [-1, 0],
+    };
     const onKey = (ev: KeyboardEvent) => {
       if (phaseRef.current === 'reveal' || phaseRef.current === 'plotting') {
         // Skip on activation keys only — never swallow Tab or shortcuts.
@@ -474,16 +490,41 @@ export default function PuzzleScreen({
           ev.preventDefault();
           skip();
         }
-      } else if (phaseRef.current === 'aiming' && ev.key === 'Enter' && aimRef.current) {
-        confirmAim();
+        return;
       }
+      if (phaseRef.current !== 'aiming') return;
+      if (ev.key === 'Enter' && aimRef.current) {
+        confirmAim();
+        return;
+      }
+      const arrow = ARROWS[ev.key];
+      if (!arrow || !setAimRef.current) return;
+      ev.preventDefault();
+      // Screen-relative: the camera is rotated so upDir points up-screen;
+      // screen-right is upDir's right-hand perpendicular.
+      const [ax, ay] = arrow;
+      const rightDir = { x: upDir.y, y: -upDir.x };
+      const step = ev.shiftKey ? 12 : 3;
+      const current = aimRef.current
+        ? proj.toLocal(aimRef.current)
+        : // First arrow press drops the pin straight at the pin, at reach.
+          {
+            x: ballLocal.x + upDir.x * Math.min(maxReach, holeDistance),
+            y: ballLocal.y + upDir.y * Math.min(maxReach, holeDistance),
+          };
+      const moved = aimRef.current
+        ? {
+            x: current.x + (ax * rightDir.x + ay * upDir.x) * step,
+            y: current.y + (ax * rightDir.y + ay * upDir.y) * step,
+          }
+        : current;
+      setAimRef.current(proj.toLonLat(moved));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [skip, confirmAim]);
+  }, [skip, confirmAim, proj, ballLocal, upDir, holeDistance, maxReach]);
 
   // ---------------------------------------------------------------- render
-  const maxReach = Math.round(maxCarry(profile, puzzle.lie));
   const stamp = outcome ? bandStamp.labels[outcome.band] : '';
   const stampColor = outcome ? bandStamp.colors[outcome.band] : undefined;
 
@@ -531,8 +572,8 @@ export default function PuzzleScreen({
 
         {phase === 'aiming' && (
           <div className="folio-label pointer-events-none absolute left-3 top-3 bg-[rgba(16,21,17,0.85)] px-3 py-1.5 text-[13px] text-[rgba(241,235,221,0.92)]">
-            {puzzle.lie === 'tee' ? 'Tee shot' : `From the ${puzzle.lie}`} · drop a pin — where do
-            you aim?
+            {puzzle.lie === 'tee' ? 'Tee shot' : `From the ${puzzle.lie}`} · drop a pin — tap the
+            map or press the arrow keys
           </div>
         )}
         {phase === 'plotting' && (
@@ -570,13 +611,15 @@ export default function PuzzleScreen({
         )}
         {(phase === 'reveal' || phase === 'plotting') && (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-            <span className="stat-caption text-[rgba(241,235,221,0.6)]">tap to skip</span>
+            <span className="stat-caption bg-[rgba(16,21,17,0.85)] px-3 py-1.5 text-[rgba(241,235,221,0.85)]">
+              tap to skip
+            </span>
           </div>
         )}
       </div>
 
-      {outcome && phase === 'done' && (
-        <div className="mt-4">
+      {outcome && (stampOn || phase === 'done') && (
+        <div className="mt-4" aria-live="polite">
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
             <div>
               <div className="stat-caption">SG loss</div>
@@ -604,23 +647,25 @@ export default function PuzzleScreen({
               </div>
             </div>
           </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={reAim}
-              className="min-h-11 rounded-folio border border-hairline bg-paper px-5 font-ui text-[14px]"
-            >
-              Re-aim this shot
-            </button>
-            {nextPuzzleId && (
-              <Link
-                href={`/puzzle/${nextPuzzleId}`}
-                className="grid min-h-11 place-items-center rounded-folio bg-ink px-5 font-ui text-[14px] text-paper"
+          {phase === 'done' && (
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={reAim}
+                className="min-h-11 rounded-folio border border-hairline bg-paper px-5 font-ui text-[14px]"
               >
-                Next puzzle →
-              </Link>
-            )}
-          </div>
+                Re-aim this shot
+              </button>
+              {nextPuzzleId && (
+                <Link
+                  href={`/puzzle/${nextPuzzleId}`}
+                  className="grid min-h-11 place-items-center rounded-folio bg-ink px-5 font-ui text-[14px] text-paper"
+                >
+                  Next puzzle →
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       )}
 

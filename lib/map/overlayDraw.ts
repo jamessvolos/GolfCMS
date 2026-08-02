@@ -156,24 +156,25 @@ export function drawReveal(
     ctx.lineWidth = 3;
     ctx.strokeStyle = color.viewport;
     ctx.fillStyle = color.contourInk;
-    // Seed with the benchmark position so no label lands on the glyph.
-    const placed: { x: number; y: number }[] = [{ x: scene.optimal.x, y: scene.optimal.y }];
+    // Collision-nudge in PIXEL space (zoom-independent), seeded with the
+    // benchmark glyph so no label lands on it.
+    const optPx = project(scene.optimal);
+    const placed: { x: number; y: number }[] = [optPx];
     for (const lvl of levels) {
       if (!lvl.strokes.length) continue;
       const line = lvl.strokes.reduce((a, b) => (b.length > a.length ? b : a));
-      const bottom = { ...line.reduce((a, b) => (b.y < a.y ? b : a)) };
-      for (let guard = 0; guard < 6; guard++) {
-        const hit = placed.some(
-          (p) => Math.abs(p.x - bottom.x) < 17 && Math.abs(p.y - bottom.y) < 8,
-        );
-        if (!hit) break;
-        bottom.y -= 7;
-      }
-      placed.push({ x: bottom.x, y: bottom.y });
+      const bottom = line.reduce((a, b) => (b.y < a.y ? b : a));
       const s = project(bottom);
+      s.y += 14;
+      for (let guard = 0; guard < 6; guard++) {
+        const hit = placed.some((p) => Math.abs(p.x - s.x) < 36 && Math.abs(p.y - s.y) < 14);
+        if (!hit) break;
+        s.y += 13;
+      }
+      placed.push({ x: s.x, y: s.y });
       const text = '+' + lvl.level.toFixed(2);
-      ctx.strokeText(text, s.x, s.y + 14);
-      ctx.fillText(text, s.x, s.y + 14);
+      ctx.strokeText(text, s.x, s.y);
+      ctx.fillText(text, s.x, s.y);
     }
     ctx.restore();
   }
