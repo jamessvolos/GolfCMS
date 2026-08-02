@@ -14,6 +14,16 @@ import type { HoleData } from '@/lib/engine/types';
 export const ESRI_ATTRIBUTION =
   'Imagery © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community';
 
+/**
+ * Sandboxed dev containers can't reach Esri from the browser; setting
+ * NEXT_PUBLIC_TILE_PROXY=1 at build time routes tiles through the
+ * same-origin relay at /api/tiles (see app/api/tiles/.../route.ts).
+ */
+const TILE_URL =
+  process.env.NEXT_PUBLIC_TILE_PROXY === '1'
+    ? '/api/tiles/{z}/{y}/{x}'
+    : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+
 const PAINT_ORDER = ['ob', 'recovery', 'fairway', 'bunker', 'water', 'green'] as const;
 
 export function buildMapStyle(hole: HoleData, opts: { groundPlan: boolean }): StyleSpecification {
@@ -26,9 +36,7 @@ export function buildMapStyle(hole: HoleData, opts: { groundPlan: boolean }): St
     sources: {
       esri: {
         type: 'raster',
-        tiles: [
-          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        ],
+        tiles: [TILE_URL],
         tileSize: 256,
         maxzoom: 19,
         attribution: ESRI_ATTRIBUTION,
