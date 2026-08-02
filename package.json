@@ -8,7 +8,12 @@
     "test:watch": "vitest",
     "demo": "tsx scripts/demo.ts",
     "build:hole": "tsx scripts/build-hole.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "predev": "node scripts/copy-maplibre-worker.mjs",
+    "prebuild": "node scripts/copy-maplibre-worker.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "repository": {
     "type": "git",
@@ -20,14 +25,28 @@
   "type": "module",
   "private": "true",
   "dependencies": {
+    "@fontsource/archivo": "^5.3.0",
+    "@fontsource/archivo-narrow": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/libre-caslon-display": "^5.3.0",
     "@turf/turf": "^7.3.5",
-    "d3-contour": "^4.0.2"
+    "d3-contour": "^4.0.2",
+    "maplibre-gl": "^6.1.0",
+    "next": "^16.2.12",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/d3-contour": "^3.0.6",
     "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "postcss": "^8.5.25",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.23.1",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.10"
   }
 }

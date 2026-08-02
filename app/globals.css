@@ -1,0 +1,142 @@
+@import 'tailwindcss';
+
+/* Token values are injected as :root custom properties from
+   lib/design/tokens.ts in app/layout.tsx — that file is the source of truth.
+   These rules only give the tokens ergonomic handles. */
+
+@theme inline {
+  --color-ink: var(--sg-ink);
+  --color-paper: var(--sg-paper);
+  --color-paper-edge: var(--sg-paper-edge);
+  --color-fairway: var(--sg-fairway);
+  --color-flag: var(--sg-flag);
+  --color-brass: var(--sg-brass);
+  --color-viewport: var(--sg-viewport);
+  --color-hairline: var(--sg-hairline);
+  --color-ink-soft: var(--sg-ink-soft);
+  --font-display: var(--sg-font-display);
+  --font-ui: var(--sg-font-ui);
+  --font-label: var(--sg-font-label);
+  --font-mono: var(--sg-font-mono);
+  --radius-folio: var(--sg-radius-folio);
+}
+
+html {
+  background: var(--sg-paper);
+}
+
+body {
+  background: var(--sg-paper);
+  color: var(--sg-ink);
+  font-family: var(--sg-font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere: 2px flag red, offset 2px. */
+:focus-visible {
+  outline: 2px solid var(--sg-flag);
+  outline-offset: 2px;
+}
+
+/* Folio primitives */
+.rule-hairline {
+  border: 0;
+  border-top: 1px solid var(--sg-hairline);
+}
+.rule-engraved {
+  border: 0;
+  border-top: 2px solid var(--sg-ink);
+}
+.folio-eyebrow {
+  font-family: var(--sg-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sg-brass);
+}
+.folio-label {
+  font-family: var(--sg-font-label);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.08em;
+}
+.stat-caption {
+  font-family: var(--sg-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sg-brass);
+}
+.mono-nums {
+  font-family: var(--sg-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numerals are mono, tabular, everywhere a number appears. */
+
+/* ------------------------------------------------------------------ map */
+
+/* Fixed imagery toning; the reveal's lock beat dims it 10%. */
+.sg-map .maplibregl-canvas {
+  filter: var(--sg-imagery-filter);
+  transition: filter 150ms ease-out;
+}
+.sg-map.sg-dimmed .maplibregl-canvas {
+  filter: var(--sg-imagery-filter-dim);
+}
+.sg-map .maplibregl-canvas-container.maplibregl-interactive {
+  cursor: crosshair;
+}
+/* Attribution must stay legible — tone it to the instrument. */
+.sg-map .maplibregl-ctrl.maplibregl-ctrl-attrib,
+.sg-map details.maplibregl-ctrl-attrib.maplibregl-compact,
+.sg-map details.maplibregl-ctrl-attrib.maplibregl-compact-show {
+  background: rgba(16, 21, 17, 0.78);
+  border-radius: 0;
+  font-family: var(--sg-font-ui);
+  font-size: 10px;
+}
+.sg-map .maplibregl-ctrl-attrib,
+.sg-map .maplibregl-ctrl-attrib a {
+  color: rgba(241, 235, 221, 0.75);
+}
+.sg-map .maplibregl-ctrl-attrib-button {
+  filter: invert(0.9);
+}
+
+.sg-ball-marker {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--sg-paper);
+  border: 2px solid var(--sg-viewport);
+  outline: 1px solid rgba(241, 235, 221, 0.65);
+}
+.sg-aim-marker,
+.sg-pin-marker {
+  line-height: 0;
+}
+
+/* Band stamp: Caslon caps, inked at −4°. */
+.sg-stamp {
+  transform: rotate(-4deg);
+  animation: sg-stamp-in 250ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes sg-stamp-in {
+  from {
+    opacity: 0;
+    transform: rotate(-4deg) scale(1.22);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sg-map .maplibregl-canvas {
+    transition: none;
+  }
+  .sg-stamp {
+    animation: none;
+  }
+}
