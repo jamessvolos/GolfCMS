@@ -1,14 +1,12 @@
 /**
- * Engine web worker: hole preparation, Monte Carlo aim evaluation, and the
- * full grid search + contour extraction, all off the main thread. The grid
- * is kicked off while the player is still aiming, so the reveal usually has
- * its isolines ready the moment the pin locks.
+ * Engine web worker: hole preparation and Monte Carlo aim evaluation off
+ * the main thread, plus a full grid-summary computation used as a fallback
+ * when the server-side heatmap cache is unreachable.
  */
 
 import { evaluateAim, type Situation } from '@/lib/engine/evaluate';
-import { evaluateGrid } from '@/lib/engine/optimize';
 import { prepareHole } from '@/lib/engine/hole';
-import { contoursFromGrid } from '@/lib/map/contours';
+import { computeGridSummary } from '@/lib/puzzle/gridSummary';
 import type { PreparedHole } from '@/lib/engine/types';
 import type { SituationWire, WorkerRequest, WorkerResponse } from './protocol';
 
@@ -36,30 +34,10 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
 
     if (msg.type === 'grid') {
       const sit = toSituation(prepared, msg.sit);
-      const grid = evaluateGrid(prepared, sit, msg.profile, msg.category, {
+      const summary = computeGridSummary(prepared, sit, msg.profile, msg.category, {
         nSamples: msg.nSamples,
       });
-      const contours = contoursFromGrid(grid, sit.ball, sit.pin, msg.profile, sit.lie);
-      post({
-        type: 'grid',
-        id: msg.id,
-        summary: {
-          contours,
-          optimal: {
-            local: grid.optimal.point,
-            lonlat: prepared.toLonLat(grid.optimal.point),
-            e: grid.optimal.expectedStrokes,
-            clubLabel: grid.optimal.result.outcomeStats.club.label,
-            result: grid.optimal.result,
-          },
-          naive: {
-            local: grid.naive.point,
-            lonlat: prepared.toLonLat(grid.naive.point),
-            e: grid.naive.expectedStrokes,
-          },
-          trapSize: grid.trapSize,
-        },
-      });
+      post({ type: 'grid', id: msg.id, summary });
       return;
     }
 

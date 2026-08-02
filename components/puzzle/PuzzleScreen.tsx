@@ -16,17 +16,16 @@ import type { Map as MLMap, Marker as MLMarker } from 'maplibre-gl';
 import { selectClub, maxCarry } from '@/lib/engine/clubs';
 import { dispersionParams } from '@/lib/engine/dispersion';
 import { createProjection, dist } from '@/lib/engine/projection';
-import { SEED_PROFILE } from '@/lib/engine/profile';
-import { eloDeltas, puzzleRatingFromTrap, scoreBand } from '@/lib/engine/scoring';
+import { bucketedProfile, profileBucket } from '@/lib/engine/profile';
+import { scoreBand } from '@/lib/engine/scoring';
 import type { HoleData, LonLat, Pt } from '@/lib/engine/types';
 import { bandStamp, reveal as beats } from '@/lib/design/tokens';
 import { buildMapStyle } from '@/lib/map/groundStyle';
 import { drawRangeTicks, drawReveal } from '@/lib/map/overlayDraw';
 import type { EllipseSpec, RevealScene } from '@/lib/map/overlayDraw';
-import type { PuzzleContent } from '@/lib/content/holes';
 import { EngineClient } from '@/lib/worker/engineClient';
 import type { GridSummary } from '@/lib/worker/protocol';
-import { getRating, setRating } from '@/lib/progress/local';
+import type { ProfileRecord, PuzzleRecord } from '@/lib/server/content';
 
 type Phase = 'boot' | 'aiming' | 'plotting' | 'reveal' | 'done' | 'error';
 
@@ -40,7 +39,20 @@ interface Outcome {
   eloDelta: number;
   newRating: number;
   puzzleRating: number;
+  /** Re-aims after a recorded attempt don't move ratings. */
   practice: boolean;
+  /** False when the attempt POST failed and no rating change happened. */
+  recorded: boolean;
+}
+
+interface AttemptResponse {
+  sgLoss: number;
+  band: Outcome['band'];
+  playerE: number;
+  optimalE: number;
+  eloDelta: number;
+  newRating: number;
+  puzzleRating: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -48,13 +60,17 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export default function PuzzleScreen({
   hole,
   puzzle,
+  profile,
   nextPuzzleId,
 }: {
   hole: HoleData;
-  puzzle: PuzzleContent;
+  puzzle: PuzzleRecord;
+  profile: ProfileRecord;
   nextPuzzleId: string | null;
 }) {
-  const profile = SEED_PROFILE;
+  // Cached grids are keyed by bucket, so every evaluation here — the HUD
+  // club, the ellipses, the aim scoring — uses the same bucketed profile.
+  const evalProfile = useMemo(() => bucketedProfile(profile), [profile]);
   const proj = useMemo(() => createProjection(hole.imageryCenter), [hole]);
   const ballLocal = useMemo(() => proj.toLocal(puzzle.ballPosition), [proj, puzzle]);
   const pinLocal = useMemo(() => proj.toLocal(puzzle.pinPosition), [proj, puzzle]);
@@ -71,7 +87,7 @@ export default function PuzzleScreen({
     () => ({ ball: puzzle.ballPosition, pin: puzzle.pinPosition, lie: puzzle.lie }),
     [puzzle],
   );
-  const maxReach = Math.round(maxCarry(profile, puzzle.lie));
+  const maxReach = Math.round(maxCarry(evalProfile, puzzle.lie));
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
@@ -86,7 +102,7 @@ export default function PuzzleScreen({
   const progressRef = useRef({ contours: 0, ellipses: 0, labels: 0 });
   const rafRef = useRef(0);
   const skipRef = useRef(false);
-  const eloAppliedRef = useRef(false);
+  const attemptRecordedRef = useRef(false);
   const aimRef = useRef<LonLat | null>(null);
   const phaseRef = useRef<Phase>('boot');
   /** Places or moves the aim pin; wired up once the map exists. */
@@ -147,7 +163,7 @@ export default function PuzzleScreen({
       if (!hud || !map) return;
       const local = proj.toLocal(lonlat);
       const d = dist(ballLocal, local);
-      const sel = selectClub(profile, puzzle.lie, d);
+      const sel = selectClub(evalProfile, puzzle.lie, d);
       const clubText = sel.clamped ? `${sel.club.label} (max)` : sel.club.label;
       hud.innerHTML = `<b>${Math.round(d)}y</b> · ${clubText.toUpperCase()}`;
       const s = map.project([lonlat.lon, lonlat.lat]);
@@ -155,7 +171,7 @@ export default function PuzzleScreen({
       hud.style.display = 'block';
       setAimInfo({ distance: Math.round(d), club: clubText });
     },
-    [proj, ballLocal, profile, puzzle.lie],
+    [proj, ballLocal, evalProfile, puzzle.lie],
   );
 
   // --------------------------------------------------------------- map init
@@ -164,14 +180,27 @@ export default function PuzzleScreen({
 
     const engine = new EngineClient();
     engineRef.current = engine;
-    gridPromiseRef.current = engine
-      .init(hole)
-      .then(() => engine.grid(sitWire, profile, puzzle.category))
-      .then((summary) => {
-        gridReadyRef.current = summary;
-        if (!disposed) setGridReady(true);
-        return summary;
-      });
+    const engineReady = engine.init(hole);
+    engineReady.catch(() => {});
+
+    // Primary source: the server-side heatmap cache (per profile bucket).
+    // Fallback: compute in the worker, so the puzzle still works if the
+    // API is unreachable.
+    gridPromiseRef.current = (async () => {
+      try {
+        const res = await fetch(`/api/heatmap?puzzleId=${encodeURIComponent(puzzle.id)}`);
+        if (!res.ok) throw new Error(`heatmap ${res.status}`);
+        const data = (await res.json()) as { summary: GridSummary };
+        return data.summary;
+      } catch {
+        await engineReady;
+        return engine.grid(sitWire, evalProfile, puzzle.category);
+      }
+    })().then((summary) => {
+      gridReadyRef.current = summary;
+      if (!disposed) setGridReady(true);
+      return summary;
+    });
     // Surface engine failures instead of leaving the player stuck: the
     // promise is re-awaited in confirmAim, which owns the error phase, but
     // an early rejection must not become an unhandled-rejection crash.
@@ -339,12 +368,27 @@ export default function PuzzleScreen({
     wrapRef.current?.classList.add('sg-dimmed');
     navigator.vibrate?.(10);
 
+    // A recorded attempt is scored server-side (Elo + persistence); re-aims
+    // are practice and stay local. Attempt failures degrade gracefully.
+    const practice = attemptRecordedRef.current;
+    const attemptPromise: Promise<AttemptResponse | null> = practice
+      ? Promise.resolve(null)
+      : fetch('/api/attempt', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ puzzleId: puzzle.id, aim }),
+        })
+          .then((r) => (r.ok ? (r.json() as Promise<AttemptResponse>) : null))
+          .catch(() => null);
+
     let aimEval: Awaited<ReturnType<EngineClient['aim']>>;
     let grid: GridSummary;
+    let attempt: AttemptResponse | null;
     try {
-      [aimEval, grid] = await Promise.all([
-        engine.aim(sitWire, profile, aim),
+      [aimEval, grid, attempt] = await Promise.all([
+        engine.aim(sitWire, evalProfile, aim),
         gridPromiseRef.current!,
+        attemptPromise,
       ]);
     } catch {
       wrapRef.current?.classList.remove('sg-dimmed');
@@ -356,7 +400,7 @@ export default function PuzzleScreen({
     const mkEllipse = (aimLocal: Pt, effDistance: number): EllipseSpec => {
       const d = Math.max(0.5, dist(ballLocal, aimLocal));
       const dir = { x: (aimLocal.x - ballLocal.x) / d, y: (aimLocal.y - ballLocal.y) / d };
-      const params = dispersionParams(profile, puzzle.lie, effDistance);
+      const params = dispersionParams(evalProfile, puzzle.lie, effDistance);
       const center = {
         x: ballLocal.x + dir.x * effDistance + dir.y * params.meanLat,
         y: ballLocal.y + dir.y * effDistance - dir.x * params.meanLat,
@@ -373,29 +417,24 @@ export default function PuzzleScreen({
       washLevel: 0.5,
     };
 
-    // Score the attempt.
-    const sgLoss = aimEval.result.expectedStrokes - grid.optimal.e;
-    const band = scoreBand(sgLoss);
-    const puzzleRating = puzzleRatingFromTrap(grid.trapSize);
-    const practice = eloAppliedRef.current;
-    const rating = getRating();
-    const deltas = eloDeltas(rating, puzzleRating, band.eloScore);
-    const newRating = practice ? rating : rating + deltas.player;
-    if (!practice) {
-      setRating(newRating);
-      eloAppliedRef.current = true;
-    }
+    // Score: the server's numbers are authoritative when recorded; the
+    // local evaluation (same seed, same bucketed profile) matches them and
+    // carries practice re-aims or offline attempts.
+    if (attempt) attemptRecordedRef.current = true;
+    const sgLoss = attempt?.sgLoss ?? aimEval.result.expectedStrokes - grid.optimal.e;
+    const band = attempt?.band ?? scoreBand(sgLoss).band;
     const o: Outcome = {
       sgLoss,
-      band: band.band,
-      playerE: aimEval.result.expectedStrokes,
+      band,
+      playerE: attempt?.playerE ?? aimEval.result.expectedStrokes,
       optimalE: grid.optimal.e,
       playerClub: aimEval.result.outcomeStats.club.label,
       optimalClub: grid.optimal.clubLabel,
-      eloDelta: practice ? 0 : deltas.player,
-      newRating,
-      puzzleRating,
+      eloDelta: attempt?.eloDelta ?? 0,
+      newRating: attempt?.newRating ?? profile.elo,
+      puzzleRating: attempt?.puzzleRating ?? puzzle.rating,
       practice,
+      recorded: attempt !== null,
     };
     setOutcome(o);
 
@@ -450,7 +489,7 @@ export default function PuzzleScreen({
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
-  }, [ballLocal, finishReveal, profile, puzzle.lie, redraw, setPhase, sitWire]);
+  }, [ballLocal, finishReveal, evalProfile, profile.elo, puzzle, redraw, setPhase, sitWire]);
 
   const skip = useCallback(() => {
     if (phaseRef.current === 'plotting' || phaseRef.current === 'reveal') {
@@ -638,11 +677,15 @@ export default function PuzzleScreen({
               </div>
             </div>
             <div>
-              <div className="stat-caption">{outcome.practice ? 'Practice' : 'Elo'}</div>
+              <div className="stat-caption">
+                {outcome.practice ? 'Practice' : outcome.recorded ? 'Elo' : 'Elo (offline)'}
+              </div>
               <div className="mono-nums text-[15px]">
                 {outcome.practice
                   ? 'no rating change'
-                  : `${outcome.eloDelta >= 0 ? '+' : ''}${tick.elo} → ${outcome.newRating}`}
+                  : outcome.recorded
+                    ? `${outcome.eloDelta >= 0 ? '+' : ''}${tick.elo} → ${outcome.newRating}`
+                    : 'rating not recorded'}
                 <span className="text-ink-soft"> · puzzle {outcome.puzzleRating}</span>
               </div>
             </div>
@@ -671,7 +714,8 @@ export default function PuzzleScreen({
 
       {phase !== 'done' && (
         <p className="mono-nums mt-3 text-[12px] text-ink-soft">
-          {puzzle.description} · max reach {maxReach}y · pin {Math.round(holeDistance)}y
+          {puzzle.description} · max reach {maxReach}y · pin {Math.round(holeDistance)}y · scored
+          as {profileBucket(profile)}
           {gridReady ? '' : ' · surveying the field…'}
         </p>
       )}

@@ -7,9 +7,21 @@ import { BUCKET_HANDICAP_STEP, BUCKET_SPEED_STEP } from './constants';
 import type { PlayerProfile } from './types';
 
 export function profileBucket(profile: PlayerProfile): string {
-  const h = Math.round(profile.handicap / BUCKET_HANDICAP_STEP) * BUCKET_HANDICAP_STEP;
-  const s = Math.round(profile.clubSpeedMph / BUCKET_SPEED_STEP) * BUCKET_SPEED_STEP;
-  return `h${h}-s${s}-${profile.shotShape}`;
+  const b = bucketedProfile(profile);
+  return `h${b.handicap}-s${b.clubSpeedMph}-${b.shotShape}`;
+}
+
+/**
+ * The profile actually used for evaluation. Cached grids are computed per
+ * bucket, so the player's aim MUST be scored with the same bucketed profile
+ * or sgLoss would compare expectations from two different players.
+ */
+export function bucketedProfile(profile: PlayerProfile): PlayerProfile {
+  return {
+    handicap: Math.round(profile.handicap / BUCKET_HANDICAP_STEP) * BUCKET_HANDICAP_STEP,
+    clubSpeedMph: Math.round(profile.clubSpeedMph / BUCKET_SPEED_STEP) * BUCKET_SPEED_STEP,
+    shotShape: profile.shotShape,
+  };
 }
 
 /** The default seed profile used in tests and the demo CLI. */

@@ -13,7 +13,10 @@
     "prebuild": "node scripts/copy-maplibre-worker.mjs",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts"
   },
   "repository": {
     "type": "git",
@@ -29,6 +32,8 @@
     "@fontsource/archivo-narrow": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/libre-caslon-display": "^5.3.0",
+    "@prisma/adapter-better-sqlite3": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "@turf/turf": "^7.3.5",
     "d3-contour": "^4.0.2",
     "maplibre-gl": "^6.1.0",
@@ -45,6 +50,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "postcss": "^8.5.25",
+    "prisma": "^7.9.1",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.1",
     "typescript": "^5.9.3",

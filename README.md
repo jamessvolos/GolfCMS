@@ -15,19 +15,30 @@ Full product spec: [docs/spec.md](docs/spec.md)
   Broadie-style baselines, Monte Carlo `evaluateAim`, candidate-grid
   optimizer, scoring bands, Elo), unit-tested, with one hand-annotated hole
   and an ASCII acceptance demo.
-- ⏳ Milestone 2 — puzzle UI (MapLibre + d3-contour reveal).
+- ✅ **Milestone 2 — puzzle UI.** MapLibre instrument with toned Esri
+  imagery, tap/keyboard aiming with the live HUD, and the three-beat reveal
+  (lock → pen-plot isolines → band stamp), skippable and reduced-motion
+  safe, measured on the 150/650/900ms budget.
+- ✅ **Milestone 3 — profiles.** Folio settings screen; Prisma + SQLite
+  (Postgres-ready); the engine scores every aim with your bucketed profile;
+  heatmap grids cached server-side per `(puzzleId, profileBucket)`;
+  attempts and Elo persisted.
+- ⏳ Milestone 4 — annotation admin + 10 real holes.
 
 ## Try it
 
 ```bash
 npm install
-npm test        # engine unit tests
+npm run db:push && npm run db:seed   # create + seed the SQLite dev DB
+npm run dev                          # then open http://localhost:3000
+
+npm test        # engine + cache unit tests
 npm run demo    # ASCII expected-strokes contours for a 5- vs 20-handicap
 ```
 
-The demo prints the "Cape" fixture hole twice — the optimal tee-shot aim
-visibly shifts away from the water as the dispersion widens between a 5- and
-a 20-handicap, which is the Milestone 1 acceptance check.
+In a sandboxed container whose browser can't reach Esri directly, build
+with `NEXT_PUBLIC_TILE_PROXY=1` to route imagery through the same-origin
+relay.
 
 ## Layout
 

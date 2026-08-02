@@ -1,0 +1,78 @@
+// SG Trainer data model — SQLite for dev, Postgres-ready.
+// SQLite has no native enums, so union-typed fields (shotShape, lie,
+// category, band) are Strings validated with zod at the boundary; they
+// become real enums when the datasource moves to Postgres.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Profile {
+  id        String    @id @default("local")
+  name      String    @default("Player")
+  handicap  Float     @default(14)
+  clubSpeed Int       @default(110)
+  shotShape String    @default("draw") // draw | straight | fade
+  elo       Int       @default(1200)
+  xp        Int       @default(0)
+  streak    Int       @default(0)
+  updatedAt DateTime  @updatedAt
+  attempts  Attempt[]
+}
+
+model Hole {
+  id            String   @id
+  courseName    String
+  holeNumber    Int
+  par           Int
+  yardage       Int
+  geojson       String // GeoJSON FeatureCollection, JSON text
+  imageryCenter String // { lon, lat }, JSON text
+  puzzles       Puzzle[]
+}
+
+model Puzzle {
+  id           String    @id
+  holeId       String
+  ballPosition String // { lon, lat }, JSON text
+  lie          String // tee | fairway | rough | sand | recovery
+  pinPosition  String // { lon, lat }, JSON text
+  category     String // tee | approach | layup | recovery
+  description  String    @default("")
+  rating       Int       @default(1000)
+  trapSize     Float     @default(0)
+  hole         Hole      @relation(fields: [holeId], references: [id])
+  attempts     Attempt[]
+  heatmaps     HeatmapCache[]
+}
+
+model Attempt {
+  id        String   @id @default(cuid())
+  puzzleId  String
+  profileId String
+  aimPoint  String // { lon, lat }, JSON text
+  sgLoss    Float
+  band      String // perfect | good | okay | miss
+  eloDelta  Int
+  createdAt DateTime @default(now())
+  puzzle    Puzzle   @relation(fields: [puzzleId], references: [id])
+  profile   Profile  @relation(fields: [profileId], references: [id])
+}
+
+model HeatmapCache {
+  id            String   @id @default(cuid())
+  puzzleId      String
+  profileBucket String
+  grid          String // GridSummary JSON (contours, optimal, naive, trap)
+  optimalAim    String // { lon, lat }, JSON text
+  optimalE      Float
+  createdAt     DateTime @default(now())
+  puzzle        Puzzle   @relation(fields: [puzzleId], references: [id])
+
+  @@unique([puzzleId, profileBucket])
+}

@@ -7,3 +7,5 @@ dist/
 .env.local
 public/vendor/
 tsconfig.tsbuildinfo
+prisma/dev.db*
+lib/generated/

@@ -3,7 +3,7 @@
  * All geometry crossing the boundary is lon/lat; the worker owns projection.
  */
 
-import type { ContourSet } from '@/lib/map/contours';
+import type { GridSummary } from '@/lib/puzzle/gridSummary';
 import type {
   EvalResult,
   HoleData,
@@ -13,6 +13,8 @@ import type {
   Pt,
   PuzzleCategory,
 } from '@/lib/engine/types';
+
+export type { GridSummary };
 
 export interface SituationWire {
   ball: LonLat;
@@ -31,14 +33,6 @@ export type WorkerRequest =
       nSamples?: number;
     }
   | { type: 'aim'; id: number; sit: SituationWire; profile: PlayerProfile; aim: LonLat };
-
-export interface GridSummary {
-  contours: ContourSet;
-  /** Local-yard positions (project with the hole's imageryCenter). */
-  optimal: { local: Pt; lonlat: LonLat; e: number; clubLabel: string; result: EvalResult };
-  naive: { local: Pt; lonlat: LonLat; e: number };
-  trapSize: number;
-}
 
 export type WorkerResponse =
   | { type: 'ready'; id: number }
