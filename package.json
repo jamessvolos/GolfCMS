@@ -20,9 +20,11 @@
   "type": "module",
   "private": "true",
   "dependencies": {
-    "@turf/turf": "^7.3.5"
+    "@turf/turf": "^7.3.5",
+    "d3-contour": "^4.0.2"
   },
   "devDependencies": {
+    "@types/d3-contour": "^3.0.6",
     "@types/node": "^26.1.2",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
