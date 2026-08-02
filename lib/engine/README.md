@@ -25,7 +25,12 @@ a player profile (handicap, club speed, shot shape), the engine:
    outcome with the Broadie-style baseline (`baseline.ts`), and average.
 4. Finds the optimal aim (`optimize.ts`) by evaluating a regular 6-yard
    candidate grid over the reachable area with common random numbers. The
-   same grid feeds the isoline renderer in the UI.
+   same grid feeds the isoline renderer in the UI. The argmin also considers
+   the pin and the naive aim as explicit candidates, so the reported optimal
+   is never worse than the obvious play (`trapSize ≥ 0` by construction) and
+   short greenside puzzles aren't hostage to cell quantization — the only
+   excluded aims are within 2 yards of the ball, where the aim direction
+   degenerates.
 5. Scores the player's aim (`scoring.ts`):
    `sgLoss = E[player aim] − E[optimal aim]`, banded into
    Perfect/Good/Okay/Miss, driving Elo for both player and puzzle.
@@ -68,6 +73,10 @@ one buffer of standard-normal pairs across every candidate (common random
 numbers), which keeps the expected-strokes surface smooth for contouring
 and makes the argmin stable. Same seed + same inputs → identical output,
 which is what the unit tests rely on.
+
+Serialization note for the heatmap cache: `EvalGrid.values` masks
+out-of-sector cells with `NaN`, and JSON turns `NaN` into `null` — code
+rehydrating a cached grid must map `null` back to `NaN` before contouring.
 
 ## Coordinate frames
 

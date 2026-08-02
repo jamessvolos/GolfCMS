@@ -87,6 +87,44 @@ describe('evaluateAim', () => {
     expect(r.expectedStrokes).toBeCloseTo(2 + 3.95, 9);
   });
 
+  it('prices outcomes with the handicap multiplier', () => {
+    // Same all-OB setup, non-scratch profile: the exact cost must carry
+    // the 1 + 0.011h multiplier through the cost model.
+    const hole = makeHole(
+      [{ kind: 'ob', ring: [[-150, 50], [150, 50], [150, 250], [-150, 250]] }],
+      [0, 400],
+    );
+    const sit = { ball: { x: 0, y: 0 }, lie: 'tee' as const, pin: { x: 0, y: 400 } };
+    const r = evaluateAim(hole, sit, P14, { x: 0, y: 150 });
+    expect(r.outcomeStats.lieBreakdown.ob).toBe(1);
+    expect(r.expectedStrokes).toBeCloseTo(2 + 3.95 * (1 + 0.011 * 14), 9);
+  });
+
+  it('prices shot shape on the correct side of the aim line', () => {
+    // Water strictly right of the corridor. For the same aim near the edge,
+    // a fade (rightward bias) must find more water than straight, and a
+    // draw less — this pins the lateral orientation of the real evaluation
+    // path, not just sampleLandings.
+    const hole = makeHole(
+      [
+        { kind: 'fairway', ring: [[-80, 100], [0, 100], [0, 320], [-80, 320]] },
+        { kind: 'water', ring: [[0, 100], [90, 100], [90, 320], [0, 320]] },
+      ],
+      [0, 400],
+    );
+    const sit = { ball: { x: 0, y: 0 }, lie: 'tee' as const, pin: { x: 0, y: 400 } };
+    const aim = { x: -12, y: 250 };
+    const water = (shape: 'draw' | 'straight' | 'fade') =>
+      evaluateAim(hole, sit, { ...P14, shotShape: shape }, aim).outcomeStats.lieBreakdown
+        .water ?? 0;
+    const e = (shape: 'draw' | 'straight' | 'fade') =>
+      evaluateAim(hole, sit, { ...P14, shotShape: shape }, aim).expectedStrokes;
+    expect(water('draw') + 0.01).toBeLessThan(water('straight'));
+    expect(water('straight') + 0.01).toBeLessThan(water('fade'));
+    expect(e('draw') + 0.02).toBeLessThan(e('straight'));
+    expect(e('straight') + 0.02).toBeLessThan(e('fade'));
+  });
+
   it('scores water with penalty plus a drop near the entry point', () => {
     const hole = makeHole(
       [{ kind: 'water', ring: [[-200, 100], [200, 100], [200, 200], [-200, 200]] }],

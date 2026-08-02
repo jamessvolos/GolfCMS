@@ -15,7 +15,8 @@ import { maxCarry } from './clubs';
 import {
   DEFAULT_SEED,
   GRID_BEYOND_PIN_MARGIN_YDS,
-  GRID_MIN_RADIUS_YDS,
+  GRID_MIN_AIM_YDS,
+  GRID_MIN_REACH_YDS,
   GRID_REACH_FACTOR,
   GRID_SECTOR_HALF_ANGLE_DEG,
   GRID_SPACING_YDS,
@@ -110,7 +111,7 @@ export function evaluateGrid(
   const reach = maxCarry(profile, lie);
   const distToPin = dist(ball, pin);
   const maxR = Math.max(
-    GRID_MIN_RADIUS_YDS + cellSize,
+    GRID_MIN_REACH_YDS,
     Math.min(reach * GRID_REACH_FACTOR, distToPin + GRID_BEYOND_PIN_MARGIN_YDS),
   );
   const bearing = Math.atan2(pin.x - ball.x, pin.y - ball.y);
@@ -131,7 +132,7 @@ export function evaluateGrid(
     for (let col = 0; col < width; col++) {
       const p: Pt = { x: (minCol + col) * cellSize, y: (minRow + row) * cellSize };
       const r = dist(ball, p);
-      if (r < GRID_MIN_RADIUS_YDS || r > maxR) continue;
+      if (r < GRID_MIN_AIM_YDS || r > maxR) continue;
       const theta = Math.atan2(p.x - ball.x, p.y - ball.y);
       if (Math.abs(angleDiff(theta, bearing)) > halfAngle) continue;
 
@@ -145,8 +146,28 @@ export function evaluateGrid(
 
   if (!best) throw new Error('Search grid contained no candidates');
 
-  // Cells beyond max carry evaluate as shots clamped to the carry circle;
-  // report the optimal at the effective aim, not the unreachable cell.
+  const naivePoint =
+    category === 'tee' ? fairwayCenterAim(prepared, ball, bearing, reach) : { ...pin };
+  const naiveResult = evaluateAim(prepared, sit, profile, naivePoint, { normals });
+
+  // The lattice can miss the best line (quantization, or a pin closer than
+  // one cell). Adding the naive aim and the pin as candidates guarantees
+  // optimal ≤ naive, so trapSize is non-negative by construction.
+  if (naiveResult.expectedStrokes < best.expectedStrokes) {
+    best = { point: { ...naivePoint }, expectedStrokes: naiveResult.expectedStrokes };
+  }
+  if (
+    (pin.x !== naivePoint.x || pin.y !== naivePoint.y) &&
+    distToPin >= GRID_MIN_AIM_YDS
+  ) {
+    const pinResult = evaluateAim(prepared, sit, profile, pin, { normals });
+    if (pinResult.expectedStrokes < best.expectedStrokes) {
+      best = { point: { ...pin }, expectedStrokes: pinResult.expectedStrokes };
+    }
+  }
+
+  // Candidates beyond max carry evaluate as shots clamped to the carry
+  // circle; report the optimal at the effective aim, not the unreachable point.
   const bestR = dist(ball, best.point);
   if (bestR > reach) {
     const s = reach / bestR;
@@ -157,10 +178,6 @@ export function evaluateGrid(
   }
 
   const optimalResult = evaluateAim(prepared, sit, profile, best.point, { normals });
-
-  const naivePoint =
-    category === 'tee' ? fairwayCenterAim(prepared, ball, bearing, reach) : { ...pin };
-  const naiveResult = evaluateAim(prepared, sit, profile, naivePoint, { normals });
 
   return {
     origin: { x: minCol * cellSize, y: minRow * cellSize },

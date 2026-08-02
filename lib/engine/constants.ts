@@ -159,8 +159,15 @@ export const GRID_SECTOR_HALF_ANGLE_DEG = 50;
 /** Don't search beyond pin distance + this margin (yards). */
 export const GRID_BEYOND_PIN_MARGIN_YDS = 40;
 
-/** Minimum search radius (yards) so short shots still get a grid. */
-export const GRID_MIN_RADIUS_YDS = 15;
+/**
+ * Degeneracy guard: candidate aims closer to the ball than this are skipped
+ * (aim direction is undefined at zero distance). Small on purpose — short
+ * greenside puzzles need near-ball candidates.
+ */
+export const GRID_MIN_AIM_YDS = 2;
+
+/** Floor on the search radius (yards) so tiny shots still get a grid. */
+export const GRID_MIN_REACH_YDS = 24;
 
 /**
  * Lie classification priority when polygons overlap (first match wins).

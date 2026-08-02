@@ -14,7 +14,7 @@
 import { baselineStrokes, strokesToHoleOut } from './baseline';
 import { selectClub } from './clubs';
 import { DEFAULT_SEED, MC_SAMPLES, WATER_PENALTY } from './constants';
-import { dispersionParams } from './dispersion';
+import { dispersionParams, sampleLandings } from './dispersion';
 import { classifyPointDetailed, waterDropPoint } from './hole';
 import { dist } from './projection';
 import { createNormalPairs } from './rng';
@@ -52,16 +52,19 @@ export function evaluateAim(
   const requested = Math.max(0.5, dist(ball, aim));
   const { club, effectiveDistance, clamped } = selectClub(profile, lie, requested);
 
-  const ux = (aim.x - ball.x) / requested;
-  const uy = (aim.y - ball.y) / requested;
-  // Right-hand perpendicular to the aim line.
-  const px = uy;
-  const py = -ux;
+  // Effective aim: the requested aim clamped to max carry along the aim line.
+  const effAim: Pt = {
+    x: ball.x + ((aim.x - ball.x) / requested) * effectiveDistance,
+    y: ball.y + ((aim.y - ball.y) / requested) * effectiveDistance,
+  };
 
   const params = dispersionParams(profile, lie, effectiveDistance);
   const normals =
     opts.normals ?? createNormalPairs(opts.seed ?? DEFAULT_SEED, opts.nSamples ?? MC_SAMPLES);
   const n = normals.length >> 1;
+  // One shared transform (dispersion.ts) so the tested rotation/shape-bias
+  // geometry is exactly what runs here.
+  const landings = sampleLandings(ball, effAim, params, normals);
 
   // OB cost is identical for every sample; compute once, lazily.
   let obCost: number | null = null;
@@ -71,13 +74,7 @@ export function evaluateAim(
   let totalPinDist = 0;
 
   for (let i = 0; i < n; i++) {
-    const along = effectiveDistance + normals[2 * i]! * params.sigmaLong;
-    const across = params.meanLat + normals[2 * i + 1]! * params.sigmaLat;
-    const landing: Pt = {
-      x: ball.x + ux * along + px * across,
-      y: ball.y + uy * along + py * across,
-    };
-
+    const landing = landings[i]!;
     const { lie: landingLie, polygon } = classifyPointDetailed(prepared, landing);
     counts[landingLie] = (counts[landingLie] ?? 0) + 1;
     const pinDist = dist(landing, pin);

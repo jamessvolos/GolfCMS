@@ -184,10 +184,19 @@ export interface EvalGrid {
    * Row-major values, length width*height. NaN = outside search sector.
    * values[row * width + col] is the cell centered at
    * (origin.x + col*cellSize, origin.y + row*cellSize).
+   * JSON caveat: serialization turns NaN into null — consumers rehydrating
+   * a cached grid (HeatmapCache) must map null back to NaN.
    */
   values: number[];
+  /**
+   * Argmin over the lattice PLUS the pin and naive aims as explicit
+   * candidates, so optimal.expectedStrokes ≤ naive.expectedStrokes always
+   * (trapSize ≥ 0) and short puzzles aren't hostage to cell quantization.
+   * Aims beyond max carry are reported at their clamped effective point.
+   */
   optimal: { point: Pt; expectedStrokes: number; result: EvalResult };
   naive: { point: Pt; expectedStrokes: number; result: EvalResult };
+  /** E[naive] − E[optimal]; non-negative by construction. */
   trapSize: number;
 }
 
