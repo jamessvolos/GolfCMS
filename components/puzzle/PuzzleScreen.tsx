@@ -28,7 +28,7 @@ import { EngineClient } from '@/lib/worker/engineClient';
 import type { GridSummary } from '@/lib/worker/protocol';
 import { getRating, setRating } from '@/lib/progress/local';
 
-type Phase = 'boot' | 'aiming' | 'plotting' | 'reveal' | 'done';
+type Phase = 'boot' | 'aiming' | 'plotting' | 'reveal' | 'done' | 'error';
 
 interface Outcome {
   sgLoss: number;
@@ -169,6 +169,10 @@ export default function PuzzleScreen({
         if (!disposed) setGridReady(true);
         return summary;
       });
+    // Surface engine failures instead of leaving the player stuck: the
+    // promise is re-awaited in confirmAim, which owns the error phase, but
+    // an early rejection must not become an unhandled-rejection crash.
+    gridPromiseRef.current.catch(() => {});
 
     let map: MLMap | null = null;
     (async () => {
@@ -327,10 +331,18 @@ export default function PuzzleScreen({
     wrapRef.current?.classList.add('sg-dimmed');
     navigator.vibrate?.(10);
 
-    const [aimEval, grid] = await Promise.all([
-      engine.aim(sitWire, profile, aim),
-      gridPromiseRef.current!,
-    ]);
+    let aimEval: Awaited<ReturnType<EngineClient['aim']>>;
+    let grid: GridSummary;
+    try {
+      [aimEval, grid] = await Promise.all([
+        engine.aim(sitWire, profile, aim),
+        gridPromiseRef.current!,
+      ]);
+    } catch {
+      wrapRef.current?.classList.remove('sg-dimmed');
+      setPhase('error');
+      return;
+    }
 
     // Build the scene.
     const mkEllipse = (aimLocal: Pt, effDistance: number): EllipseSpec => {
@@ -457,8 +469,11 @@ export default function PuzzleScreen({
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if (phaseRef.current === 'reveal' || phaseRef.current === 'plotting') {
-        ev.preventDefault();
-        skip();
+        // Skip on activation keys only — never swallow Tab or shortcuts.
+        if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Escape') {
+          ev.preventDefault();
+          skip();
+        }
       } else if (phaseRef.current === 'aiming' && ev.key === 'Enter' && aimRef.current) {
         confirmAim();
       }
@@ -494,6 +509,23 @@ export default function PuzzleScreen({
         {phase === 'boot' && (
           <div className="absolute inset-0 grid place-items-center bg-viewport">
             <span className="stat-caption">Preparing instrument…</span>
+          </div>
+        )}
+
+        {phase === 'error' && (
+          <div className="absolute inset-0 grid place-items-center bg-[rgba(16,21,17,0.9)] px-6">
+            <div className="max-w-[38ch] text-center">
+              <p className="font-ui text-[15px] text-[rgba(241,235,221,0.92)]">
+                The engine hit a snag while surveying this hole.
+              </p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="mono-nums mt-4 min-h-11 rounded-folio border border-hairline bg-paper px-5 text-[14px] text-ink"
+              >
+                Reload the puzzle
+              </button>
+            </div>
           </div>
         )}
 

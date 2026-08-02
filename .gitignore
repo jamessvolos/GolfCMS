@@ -6,3 +6,4 @@ dist/
 .env
 .env.local
 public/vendor/
+tsconfig.tsbuildinfo
