@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
         yardage: one.yardage,
         geojson: JSON.parse(one.geojson),
         imageryCenter: JSON.parse(one.imageryCenter),
+        groundPlan: one.groundPlan,
       },
       puzzles: [],
     });

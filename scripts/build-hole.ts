@@ -14,6 +14,13 @@ import { capeHole, CAPE_PUZZLES } from '@/lib/engine/holes/cape';
 import { prepareHole } from '@/lib/engine/hole';
 import type { IngestInput } from '@/lib/server/ingestHole';
 
+/** Same 9-decimal precision contract the ingest and studio use. */
+const round = (v: number) => Number(v.toFixed(9));
+const roundLonLat = (p: { lon: number; lat: number }) => ({
+  lon: round(p.lon),
+  lat: round(p.lat),
+});
+
 const hole = capeHole();
 const prepared = prepareHole(hole);
 
@@ -26,12 +33,14 @@ for (const f of hole.geojson.features) {
     polygons.push({
       kind: f.properties.kind as IngestInput['hole']['polygons'][number]['kind'],
       ...(f.properties.name ? { name: f.properties.name } : {}),
-      ring: f.geometry.coordinates[0]!.map(([lon, lat]) => [lon, lat] as [number, number]),
+      ring: f.geometry.coordinates[0]!.map(
+        ([lon, lat]) => [round(lon), round(lat)] as [number, number],
+      ),
     });
   } else if (f.properties.kind === 'pin') {
-    pin = { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] };
+    pin = roundLonLat({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] });
   } else {
-    tees.push({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] });
+    tees.push(roundLonLat({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }));
   }
 }
 if (!pin) throw new Error('cape fixture has no pin');
@@ -52,8 +61,8 @@ const payload: IngestInput = {
   },
   puzzles: CAPE_PUZZLES.map((p) => ({
     id: p.id,
-    ball: prepared.toLonLat(p.ball),
-    pin: prepared.toLonLat(prepared.pin),
+    ball: roundLonLat(prepared.toLonLat(p.ball)),
+    pin: roundLonLat(prepared.toLonLat(prepared.pin)),
     lie: p.lie,
     category: p.category,
     description: p.description,

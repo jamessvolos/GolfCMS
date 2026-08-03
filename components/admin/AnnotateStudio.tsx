@@ -44,12 +44,34 @@ const PRESETS: { label: string; lat: number; lon: number }[] = [
 
 type Placement = { kind: 'pin' } | { kind: 'tee' } | { kind: 'ball'; index: number } | null;
 
+/**
+ * terra-draw rejects coordinates beyond its 9-decimal precision contract.
+ * Round on the way in so stored geometry always survives a load — an
+ * unrounded ring is silently dropped and the next save deletes it.
+ */
+const COORD_DP = 9;
+const roundCoord = (v: number) => Number(v.toFixed(COORD_DP));
+const roundRing = (ring: [number, number][]): [number, number][] =>
+  ring.map(([lon, lat]) => [roundCoord(lon), roundCoord(lat)]);
+
 interface PuzzleDraft {
   id?: string;
   ball: LonLat | null;
   lie: 'tee' | 'fairway' | 'rough' | 'sand' | 'recovery';
   category: 'tee' | 'approach' | 'layup' | 'recovery';
   description: string;
+  /** Per-puzzle pin override, preserved across a load→save round trip. */
+  pin?: LonLat;
+}
+
+/**
+ * Fields the studio doesn't edit but must not destroy when re-saving a
+ * loaded hole (polygon names, render mode, imagery framing).
+ */
+interface PreservedMeta {
+  groundPlan?: boolean;
+  imageryCenter?: LonLat;
+  polygonNames: Map<string, string>;
 }
 
 interface HoleListing {
@@ -70,6 +92,12 @@ export default function AnnotateStudio() {
   const activeKindRef = useRef<FeatureKind>('fairway');
   const selectedRef = useRef<string | null>(null);
   const maplibreRef = useRef<typeof import('maplibre-gl') | null>(null);
+  const preservedRef = useRef<PreservedMeta>({ polygonNames: new Map() });
+  const loadedIdRef = useRef<string | null>(null);
+  /** Set when a load was lossy — saving would delete what didn't draw. */
+  const blockedRef = useRef(false);
+  /** Unsaved tracing exists; warn before the tab closes. */
+  const dirtyRef = useRef(false);
 
   const [ready, setReady] = useState(false);
   const [activeKind, setActiveKind] = useState<FeatureKind | null>(null);
@@ -224,7 +252,10 @@ export default function AnnotateStudio() {
       draw.on('deselect', () => {
         selectedRef.current = null;
       });
-      draw.on('change', () => recountPolys());
+      draw.on('change', () => {
+        dirtyRef.current = true;
+        recountPolys();
+      });
 
       map.on('click', (ev) => {
         const p = placementRef.current;
@@ -253,9 +284,18 @@ export default function AnnotateStudio() {
       if (id) void loadHole(id);
     })();
 
+    // Tracing a hole is an hour of work — don't let a stray navigation eat it.
+    const onBeforeUnload = (ev: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      ev.preventDefault();
+      ev.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+
     void refreshHoles();
     return () => {
       disposed = true;
+      window.removeEventListener('beforeunload', onBeforeUnload);
       drawRef.current?.stop();
       drawRef.current = null;
       map?.remove();
@@ -328,10 +368,21 @@ export default function AnnotateStudio() {
   };
   const clearAll = () => {
     const ids = (drawRef.current?.getSnapshot() ?? []).map((f) => f.id!) as string[];
+    if (ids.length + tees.length + puzzles.length > 0) {
+      const ok = window.confirm(
+        `Clear everything? ${ids.length} polygon(s), ${tees.length} tee(s) and ` +
+          `${puzzles.length} puzzle(s) will be discarded. Saved holes are not affected.`,
+      );
+      if (!ok) return;
+    }
     if (ids.length) drawRef.current?.removeFeatures(ids);
     setPin(null);
     setTees([]);
     setPuzzles([]);
+    preservedRef.current = { polygonNames: new Map() };
+    loadedIdRef.current = null;
+    blockedRef.current = false;
+    dirtyRef.current = false;
     recountPolys();
   };
 
@@ -360,10 +411,12 @@ export default function AnnotateStudio() {
             }[];
           };
           imageryCenter: LonLat;
+          groundPlan?: boolean;
         };
         puzzles: {
           id: string;
           ballPosition: LonLat;
+          pinPosition: LonLat;
           lie: PuzzleDraft['lie'];
           category: PuzzleDraft['category'];
           description: string;
@@ -375,15 +428,28 @@ export default function AnnotateStudio() {
 
       const nextTees: LonLat[] = [];
       let nextPin: LonLat | null = null;
+      const names = new Map<string, string>();
+      const rejected: string[] = [];
       for (const f of data.hole.geojson.features) {
         if (f.geometry.type === 'Polygon') {
-          draw?.addFeatures([
+          const ring = roundRing(f.geometry.coordinates[0] as [number, number][]);
+          if (f.properties.name) names.set(JSON.stringify(ring[0]), f.properties.name);
+          // Capture the validation result: a silently rejected polygon would
+          // vanish from the map and be deleted by the next save.
+          const results = draw?.addFeatures([
             {
               type: 'Feature',
               properties: { mode: 'polygon', kind: f.properties.kind },
-              geometry: f.geometry,
+              geometry: { type: 'Polygon', coordinates: [ring] },
             } as never,
           ]);
+          if (results?.some((r) => !r.valid)) {
+            rejected.push(
+              `${f.properties.name ?? f.properties.kind}: ${
+                results.find((r) => !r.valid)?.reason ?? 'rejected'
+              }`,
+            );
+          }
         } else if (f.properties.kind === 'pin') {
           nextPin = { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] };
         } else {
@@ -399,6 +465,7 @@ export default function AnnotateStudio() {
           lie: p.lie,
           category: p.category,
           description: p.description,
+          pin: p.pinPosition,
         })),
       );
       setMeta({
@@ -407,9 +474,25 @@ export default function AnnotateStudio() {
         holeNumber: data.hole.holeNumber,
         par: data.hole.par,
       });
+      // Hold the fields the studio doesn't edit so saving can't erase them.
+      preservedRef.current = {
+        groundPlan: data.hole.groundPlan,
+        imageryCenter: data.hole.imageryCenter,
+        polygonNames: names,
+      };
+      loadedIdRef.current = id;
       doFlyTo(data.hole.imageryCenter.lat, data.hole.imageryCenter.lon, 16.5);
       recountPolys();
-      setStatus({ tone: 'ok', text: `Loaded ${id}.` });
+      if (rejected.length) {
+        setStatus({
+          tone: 'err',
+          text: `Loaded ${id} but ${rejected.length} polygon(s) could not be drawn (${rejected.join('; ')}). Saving now would delete them — reload before editing.`,
+        });
+        blockedRef.current = true;
+      } else {
+        blockedRef.current = false;
+        setStatus({ tone: 'ok', text: `Loaded ${id}.` });
+      }
     } catch (err) {
       setStatus({ tone: 'err', text: err instanceof Error ? err.message : 'load failed' });
     } finally {
@@ -420,13 +503,21 @@ export default function AnnotateStudio() {
   const save = async () => {
     const draw = drawRef.current;
     if (!draw) return;
+    if (blockedRef.current) {
+      setStatus({
+        tone: 'err',
+        text: 'Refusing to save: part of this hole failed to load, so saving would delete it. Reload the page and try again.',
+      });
+      return;
+    }
     const polygons = draw
       .getSnapshot()
       .filter((f) => f.geometry.type === 'Polygon' && (f.properties as { kind?: string }).kind)
-      .map((f) => ({
-        kind: (f.properties as { kind: FeatureKind }).kind,
-        ring: (f.geometry.coordinates as [number, number][][])[0]!,
-      }));
+      .map((f) => {
+        const ring = roundRing((f.geometry.coordinates as [number, number][][])[0]!);
+        const name = preservedRef.current.polygonNames.get(JSON.stringify(ring[0]));
+        return { kind: (f.properties as { kind: FeatureKind }).kind, ...(name ? { name } : {}), ring };
+      });
     const readyPuzzles = puzzles.filter((p) => p.ball);
     if (!meta.id || !meta.courseName) {
       setStatus({ tone: 'err', text: 'Give the hole a slug and a course name first.' });
@@ -451,6 +542,13 @@ export default function AnnotateStudio() {
             courseName: meta.courseName,
             holeNumber: meta.holeNumber,
             par: meta.par,
+            // Preserved from the loaded hole; a fresh trace keeps the defaults.
+            ...(meta.id === loadedIdRef.current && preservedRef.current.groundPlan !== undefined
+              ? { groundPlan: preservedRef.current.groundPlan }
+              : {}),
+            ...(meta.id === loadedIdRef.current && preservedRef.current.imageryCenter
+              ? { imageryCenter: preservedRef.current.imageryCenter }
+              : {}),
             polygons,
             pin,
             tees,
@@ -458,6 +556,7 @@ export default function AnnotateStudio() {
           puzzles: readyPuzzles.map((p) => ({
             ...(p.id ? { id: p.id } : {}),
             ball: p.ball!,
+            ...(p.pin ? { pin: p.pin } : {}),
             lie: p.lie,
             category: p.category,
             description: p.description || `${meta.courseName} No. ${meta.holeNumber}`,
@@ -474,6 +573,8 @@ export default function AnnotateStudio() {
       const ratings = body.puzzles!.map((p) => `${p.id} → ${p.rating}`).join(' · ');
       const warn = body.warnings?.length ? ` · ⚠ ${body.warnings.join('; ')}` : '';
       setStatus({ tone: 'ok', text: `Saved ${meta.id} (${body.yardage}y). ${ratings}${warn}` });
+      dirtyRef.current = false;
+      loadedIdRef.current = meta.id;
       void refreshHoles();
     } catch (err) {
       setStatus({ tone: 'err', text: err instanceof Error ? err.message : 'save failed' });

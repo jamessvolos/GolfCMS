@@ -77,9 +77,18 @@ export interface IngestResult {
   warnings: string[];
 }
 
+/**
+ * Store coordinates at 9 decimal places (~0.1mm). That is terra-draw's
+ * precision contract, and geometry beyond it is silently rejected when the
+ * annotation studio loads a hole — which previously meant a load-then-save
+ * could delete polygons outright.
+ */
+const COORD_DP = 9;
+const round = (v: number) => Number(v.toFixed(COORD_DP));
+
 function buildGeojson(hole: IngestInput['hole']): HoleGeoJSON {
   const polygonFeatures: HolePolygonFeature[] = hole.polygons.map((p) => {
-    const coords = p.ring.map(([lon, lat]) => [lon, lat] as [number, number]);
+    const coords = p.ring.map(([lon, lat]) => [round(lon), round(lat)] as [number, number]);
     const [fx, fy] = coords[0]!;
     const [lx, ly] = coords[coords.length - 1]!;
     if (fx !== lx || fy !== ly) coords.push([fx, fy]);
@@ -93,13 +102,13 @@ function buildGeojson(hole: IngestInput['hole']): HoleGeoJSON {
     {
       type: 'Feature',
       properties: { kind: 'pin' },
-      geometry: { type: 'Point', coordinates: [hole.pin.lon, hole.pin.lat] },
+      geometry: { type: 'Point', coordinates: [round(hole.pin.lon), round(hole.pin.lat)] },
     },
     ...hole.tees.map(
       (t): HolePointFeature => ({
         type: 'Feature',
         properties: { kind: 'tee' },
-        geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
+        geometry: { type: 'Point', coordinates: [round(t.lon), round(t.lat)] },
       }),
     ),
   ];

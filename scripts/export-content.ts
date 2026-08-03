@@ -14,6 +14,13 @@ import type { IngestInput } from '@/lib/server/ingestHole';
 
 const OUT_DIR = join(process.cwd(), 'data', 'holes');
 
+/** Match the studio's 9-decimal precision contract (see ingestHole). */
+const round = (v: number) => Number(v.toFixed(9));
+const roundLonLat = (p: { lon: number; lat: number }) => ({
+  lon: round(p.lon),
+  lat: round(p.lat),
+});
+
 async function main() {
   const holes = await db.hole.findMany({
     include: { puzzles: { orderBy: { id: 'asc' } } },
@@ -40,12 +47,14 @@ async function main() {
         polygons.push({
           kind: f.properties.kind as IngestInput['hole']['polygons'][number]['kind'],
           ...(f.properties.name ? { name: f.properties.name } : {}),
-          ring: f.geometry.coordinates[0]!.map(([lon, lat]) => [lon, lat] as [number, number]),
+          ring: f.geometry.coordinates[0]!.map(
+            ([lon, lat]) => [round(lon), round(lat)] as [number, number],
+          ),
         });
       } else if (f.properties.kind === 'pin') {
-        pin = { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] };
+        pin = roundLonLat({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] });
       } else {
-        tees.push({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] });
+        tees.push(roundLonLat({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }));
       }
     }
     if (!pin || tees.length === 0) {
@@ -60,7 +69,7 @@ async function main() {
         holeNumber: hole.holeNumber,
         par: hole.par,
         yardage: hole.yardage,
-        imageryCenter: JSON.parse(hole.imageryCenter),
+        imageryCenter: roundLonLat(JSON.parse(hole.imageryCenter)),
         groundPlan: hole.groundPlan,
         polygons,
         pin,
@@ -68,8 +77,8 @@ async function main() {
       },
       puzzles: hole.puzzles.map((p) => ({
         id: p.id,
-        ball: JSON.parse(p.ballPosition),
-        pin: JSON.parse(p.pinPosition),
+        ball: roundLonLat(JSON.parse(p.ballPosition)),
+        pin: roundLonLat(JSON.parse(p.pinPosition)),
         lie: p.lie as IngestInput['puzzles'][number]['lie'],
         category: p.category as IngestInput['puzzles'][number]['category'],
         description: p.description,

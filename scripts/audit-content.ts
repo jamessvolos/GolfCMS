@@ -75,7 +75,16 @@ for (const file of files) {
   const problems: string[] = [];
   const notes: string[] = [];
 
-  // 1. Ring validity.
+  // 1. Ring validity — including the studio's 9-decimal precision contract:
+  // stored geometry beyond it is silently dropped when a hole is loaded.
+  const overPrecise = input.hole.polygons
+    .flatMap((p) => p.ring)
+    .filter(([lon, lat]) => Number(lon.toFixed(9)) !== lon || Number(lat.toFixed(9)) !== lat);
+  if (overPrecise.length) {
+    problems.push(
+      `${overPrecise.length} coordinate(s) beyond 9 decimal places — the studio would reject them`,
+    );
+  }
   for (const [i, p] of input.hole.polygons.entries()) {
     const ring = p.ring.map(([lon, lat]) => [lon, lat] as [number, number]);
     const [fx, fy] = ring[0]!;
