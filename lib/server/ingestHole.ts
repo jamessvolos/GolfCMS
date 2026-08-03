@@ -33,6 +33,8 @@ export const ingestSchema = z.object({
     yardage: z.number().int().min(60).max(700).optional(),
     /** Omit to default to the tee/pin midpoint. */
     imageryCenter: lonLat.optional(),
+    /** Synthetic holes paint their polygons; traced holes let imagery show. */
+    groundPlan: z.boolean().optional(),
     polygons: z
       .array(
         z.object({
@@ -118,6 +120,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
     yardage: hole.yardage ?? 0,
     geojson: buildGeojson(hole),
     imageryCenter,
+    groundPlan: hole.groundPlan ?? false,
   };
   const prepared = prepareHole(holeData);
   const teeLocal = prepared.toLocal(hole.tees[0]!);
@@ -154,6 +157,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       yardage,
       geojson: JSON.stringify(holeData.geojson),
       imageryCenter: JSON.stringify(imageryCenter),
+      groundPlan: holeData.groundPlan,
     },
     update: {
       courseName: hole.courseName,
@@ -162,6 +166,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       yardage,
       geojson: JSON.stringify(holeData.geojson),
       imageryCenter: JSON.stringify(imageryCenter),
+      groundPlan: holeData.groundPlan,
     },
   });
 

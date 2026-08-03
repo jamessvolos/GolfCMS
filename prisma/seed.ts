@@ -1,69 +1,51 @@
 /**
- * Seed the dev database through the same ingestion pipeline the annotate
- * studio uses: the single local profile plus the cape fixture hole with
- * its puzzles (ratings from trap size, warm heatmap cache).
+ * Seed the database from the committed content files in data/holes/,
+ * through the same ingestion pipeline the annotation studio uses (so
+ * ratings, geometry checks, and warm heatmap caches are identical).
  *
  *   npm run db:seed
  */
 
-import { getHole, listPuzzles } from '@/lib/content/holes';
-import { ingestHole } from '@/lib/server/ingestHole';
-import type { IngestInput } from '@/lib/server/ingestHole';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ingestHole, ingestSchema } from '@/lib/server/ingestHole';
 import { db } from '@/lib/server/db';
 
-function capeAsIngest(): IngestInput {
-  const hole = getHole();
-  const polygons: IngestInput['hole']['polygons'] = [];
-  const tees: { lon: number; lat: number }[] = [];
-  let pin: { lon: number; lat: number } | null = null;
-
-  for (const f of hole.geojson.features) {
-    if (f.geometry.type === 'Polygon') {
-      polygons.push({
-        kind: f.properties.kind as IngestInput['hole']['polygons'][number]['kind'],
-        name: f.properties.name,
-        ring: f.geometry.coordinates[0]!.map(([lon, lat]) => [lon, lat] as [number, number]),
-      });
-    } else if (f.properties.kind === 'pin') {
-      const [lon, lat] = f.geometry.coordinates;
-      pin = { lon, lat };
-    } else {
-      const [lon, lat] = f.geometry.coordinates;
-      tees.push({ lon, lat });
-    }
-  }
-  if (!pin) throw new Error('cape fixture has no pin');
-
-  return {
-    hole: {
-      id: hole.id,
-      courseName: hole.courseName,
-      holeNumber: hole.holeNumber,
-      par: hole.par,
-      yardage: hole.yardage,
-      imageryCenter: hole.imageryCenter,
-      polygons,
-      pin,
-      tees,
-    },
-    puzzles: listPuzzles().map((p) => ({
-      id: p.id,
-      ball: p.ballPosition,
-      pin: p.pinPosition,
-      lie: p.lie,
-      category: p.category,
-      description: p.description,
-    })),
-  };
-}
+const CONTENT_DIR = join(process.cwd(), 'data', 'holes');
 
 async function main() {
   await db.profile.upsert({ where: { id: 'local' }, create: { id: 'local' }, update: {} });
-  const result = await ingestHole(capeAsIngest());
-  for (const p of result.puzzles) {
-    console.log(`seeded ${p.id}: trap ${p.trapSize.toFixed(3)} → rating ${p.rating}`);
+
+  const files = readdirSync(CONTENT_DIR)
+    .filter((f) => f.endsWith('.json'))
+    .sort();
+  if (files.length === 0) {
+    console.log('no content files in data/holes — nothing to seed');
+    return;
   }
-  for (const w of result.warnings) console.log(`warning: ${w}`);
+
+  let puzzleCount = 0;
+  for (const file of files) {
+    const raw = JSON.parse(readFileSync(join(CONTENT_DIR, file), 'utf8'));
+    const parsed = ingestSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      console.error(`✗ ${file}: ${issue?.path.join('.')} — ${issue?.message}`);
+      process.exitCode = 1;
+      continue;
+    }
+    try {
+      const result = await ingestHole(parsed.data);
+      puzzleCount += result.puzzles.length;
+      const ratings = result.puzzles.map((p) => `${p.id} ${p.rating}`).join(', ');
+      console.log(`✓ ${result.holeId} (${result.yardage}y): ${ratings}`);
+      for (const w of result.warnings) console.log(`  ⚠ ${w}`);
+    } catch (err) {
+      console.error(`✗ ${file}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  }
+  console.log(`\nseeded ${files.length} holes / ${puzzleCount} puzzles`);
 }
 
 main()

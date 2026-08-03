@@ -33,6 +33,9 @@ model Hole {
   yardage       Int
   geojson       String // GeoJSON FeatureCollection, JSON text
   imageryCenter String // { lon, lat }, JSON text
+  /// Paint the vector ground plan over imagery (synthetic holes only;
+  /// holes traced over real imagery render imagery + overlays alone).
+  groundPlan    Boolean  @default(false)
   puzzles       Puzzle[]
 }
 

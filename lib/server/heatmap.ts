@@ -9,7 +9,7 @@ import { bucketedProfile, profileBucket } from '@/lib/engine/profile';
 import type { HoleData, PlayerProfile } from '@/lib/engine/types';
 import { computeGridSummary } from '@/lib/puzzle/gridSummary';
 import type { GridSummary } from '@/lib/puzzle/gridSummary';
-import type { PuzzleContent } from '@/lib/content/holes';
+import type { PuzzleContent } from '@/lib/content/types';
 
 export interface HeatmapStore {
   get(puzzleId: string, bucket: string): Promise<GridSummary | null>;

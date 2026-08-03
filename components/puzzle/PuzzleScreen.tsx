@@ -216,7 +216,9 @@ export default function PuzzleScreen({
 
       map = new maplibregl.Map({
         container: mapDivRef.current,
-        style: buildMapStyle(hole, { groundPlan: true }),
+        // Traced holes let the real imagery be the ground; synthetic
+        // fixture holes paint their polygons.
+        style: buildMapStyle(hole, { groundPlan: hole.groundPlan ?? false }),
         center: [
           (puzzle.ballPosition.lon + puzzle.pinPosition.lon) / 2,
           (puzzle.ballPosition.lat + puzzle.pinPosition.lat) / 2,

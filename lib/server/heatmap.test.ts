@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { getOrComputeHeatmap, MemoryHeatmapStore } from './heatmap';
 import { capeHole, CAPE_APPROACH } from '@/lib/engine/holes/cape';
 import { prepareHole } from '@/lib/engine/hole';
-import type { PuzzleContent } from '@/lib/content/holes';
+import type { PuzzleContent } from '@/lib/content/types';
 import type { PlayerProfile } from '@/lib/engine/types';
 
 function capeContent() {

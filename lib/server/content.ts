@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import { db } from './db';
-import type { PuzzleContent } from '@/lib/content/holes';
+import type { PuzzleContent } from '@/lib/content/types';
 import type { HoleData, PlayerProfile } from '@/lib/engine/types';
 
 const shotShape = z.enum(['draw', 'straight', 'fade']);
@@ -96,6 +96,7 @@ function parseHoleRow(row: {
   yardage: number;
   geojson: string;
   imageryCenter: string;
+  groundPlan: boolean;
 }): HoleData {
   return {
     id: row.id,
@@ -105,6 +106,7 @@ function parseHoleRow(row: {
     yardage: row.yardage,
     geojson: JSON.parse(row.geojson),
     imageryCenter: lonLat.parse(JSON.parse(row.imageryCenter)),
+    groundPlan: row.groundPlan,
   };
 }
 

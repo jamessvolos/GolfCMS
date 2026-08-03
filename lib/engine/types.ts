@@ -103,6 +103,13 @@ export interface HoleData {
   geojson: HoleGeoJSON;
   /** Center used for the local projection (and later, initial imagery view). */
   imageryCenter: LonLat;
+  /**
+   * Paint the vector ground plan over imagery. True for synthetic fixture
+   * holes whose polygons ARE the ground; false (default) for holes traced
+   * over real imagery, where the imagery carries the ground and the
+   * annotations stay invisible. The engine ignores this — it's a render hint.
+   */
+  groundPlan?: boolean;
 }
 
 export interface PuzzleData {
