@@ -9,6 +9,7 @@
       "lon": -81.3905691,
       "lat": 30.194108800000002
     },
+    "groundPlan": false,
     "polygons": [
       {
         "kind": "water",

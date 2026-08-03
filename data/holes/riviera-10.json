@@ -9,6 +9,7 @@
       "lon": -118.499262,
       "lat": 34.047374500000004
     },
+    "groundPlan": false,
     "polygons": [
       {
         "kind": "fairway",

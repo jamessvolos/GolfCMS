@@ -9,6 +9,7 @@
       "lon": -121.9471365,
       "lat": 36.5668175
     },
+    "groundPlan": false,
     "polygons": [
       {
         "kind": "green",
