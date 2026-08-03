@@ -63,8 +63,32 @@ describe('classifyPoint', () => {
     expect(classifyPoint(prepared, { x: -8, y: 200 })).toBe('sand');
   });
 
-  it('prefers water over bunker', () => {
-    expect(classifyPoint(prepared, { x: 10, y: 200 })).toBe('water');
+  it('prefers bunker over water where they overlap', () => {
+    // Annotating a bunker means "this is sand", even over a hazard polygon.
+    expect(classifyPoint(prepared, { x: 10, y: 200 })).toBe('sand');
+  });
+
+  it('prefers bunker over green (a bunker cut into a green is sand)', () => {
+    // The Road Hole case: the green outline encloses the pot bunker.
+    const road = prepareHole(
+      holeFromYardSpec({
+        id: 'road',
+        courseName: 'Test',
+        holeNumber: 17,
+        par: 4,
+        yardage: 460,
+        origin: ORIGIN,
+        polygons: [
+          { kind: 'fairway', ring: [[-40, 100], [40, 100], [40, 420], [-40, 420]] },
+          { kind: 'green', ring: [[-14, 430], [14, 430], [14, 470], [-14, 470]] },
+          { kind: 'bunker', ring: circleRing(-7, 438, 4) },
+        ],
+        pin: [6, 458],
+        tees: [[0, 0]],
+      }),
+    );
+    expect(classifyPoint(road, { x: -7, y: 438 })).toBe('sand');
+    expect(classifyPoint(road, { x: 6, y: 458 })).toBe('green');
   });
 
   it('prefers green over water (island greens)', () => {
@@ -99,8 +123,8 @@ describe('classifyPoint', () => {
 
   it('returns the containing polygon in detailed mode', () => {
     const d = classifyPointDetailed(prepared, { x: 10, y: 200 });
-    expect(d.lie).toBe('water');
-    expect(d.polygon?.kind).toBe('water');
+    expect(d.lie).toBe('sand');
+    expect(d.polygon?.kind).toBe('bunker');
     const rough = classifyPointDetailed(prepared, { x: 300, y: 300 });
     expect(rough.lie).toBe('rough');
     expect(rough.polygon).toBeNull();

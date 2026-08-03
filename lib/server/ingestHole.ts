@@ -7,6 +7,8 @@
  */
 
 import { z } from 'zod';
+import { area as turfArea, intersect, polygon as turfPolygon } from '@turf/turf';
+import { CLASSIFY_PRIORITY } from '@/lib/engine/constants';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
 import { bucketedProfile, profileBucket, SEED_PROFILE } from '@/lib/engine/profile';
 import { dist } from '@/lib/engine/projection';
@@ -104,9 +106,59 @@ function buildGeojson(hole: IngestInput['hole']): HoleGeoJSON {
   return { type: 'FeatureCollection', features: [...polygonFeatures, ...pointFeatures] };
 }
 
+/**
+ * Detect polygons a higher-priority polygon would swallow. Classification
+ * is first-match-by-priority, so a feature mostly covered by something
+ * that outranks it never classifies as itself — the Road Hole's pot
+ * bunker vanished inside its green exactly this way. Silent loss is the
+ * defect; annotators get told.
+ */
+function swallowedWarnings(hole: IngestInput['hole']): string[] {
+  const out: string[] = [];
+  const closed = hole.polygons.map((p) => {
+    const ring = p.ring.map(([lon, lat]) => [lon, lat] as [number, number]);
+    const [fx, fy] = ring[0]!;
+    const [lx, ly] = ring[ring.length - 1]!;
+    if (fx !== lx || fy !== ly) ring.push([fx, fy]);
+    return { kind: p.kind, name: p.name, feature: turfPolygon([ring]) };
+  });
+  const rank = (k: string) => CLASSIFY_PRIORITY.indexOf(k as never);
+
+  for (const [i, mine] of closed.entries()) {
+    const myArea = turfArea(mine.feature);
+    if (myArea <= 0) continue;
+    let covered = 0;
+    for (const [j, other] of closed.entries()) {
+      if (i === j || rank(other.kind) >= rank(mine.kind)) continue;
+      try {
+        const hit = intersect({
+          type: 'FeatureCollection',
+          features: [mine.feature, other.feature],
+        });
+        if (hit) covered += turfArea(hit);
+      } catch {
+        /* degenerate overlap; malformed rings are caught by the audit */
+      }
+    }
+    const frac = covered / myArea;
+    if (frac > 0.9) {
+      out.push(
+        `${mine.name ?? mine.kind} polygon ${i + 1} is ${Math.round(frac * 100)}% covered by ` +
+          `higher-priority polygons — it will never classify as ${mine.kind}`,
+      );
+    } else if (frac > 0.5) {
+      out.push(
+        `${mine.name ?? mine.kind} polygon ${i + 1} is ${Math.round(frac * 100)}% covered by ` +
+          `higher-priority polygons`,
+      );
+    }
+  }
+  return out;
+}
+
 export async function ingestHole(input: IngestInput): Promise<IngestResult> {
   const { hole, puzzles } = input;
-  const warnings: string[] = [];
+  const warnings: string[] = [...swallowedWarnings(hole)];
 
   const imageryCenter = hole.imageryCenter ?? {
     lon: (hole.tees[0]!.lon + hole.pin.lon) / 2,

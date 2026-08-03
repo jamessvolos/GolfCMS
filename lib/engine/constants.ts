@@ -171,15 +171,21 @@ export const GRID_MIN_REACH_YDS = 24;
 
 /**
  * Lie classification priority when polygons overlap (first match wins).
- * Anything inside no polygon is rough. Green outranks water so island
- * greens annotate naturally: a big water polygon under a green polygon
- * classifies the island as green, not water.
+ * Anything inside no polygon is rough.
+ *
+ * Ordered so the natural annotation of real holes just works, smallest
+ * and most specific feature first:
+ *  - bunker over green: a bunker biting into a green (the Road Hole) is
+ *    sand, even when the green outline encloses it;
+ *  - green over water: an island green sits on top of the pond polygon;
+ *  - both over fairway/recovery, which are the broad background shapes.
+ * OB stays on top — it is a boundary, not a surface.
  */
 export const CLASSIFY_PRIORITY: FeatureKind[] = [
   'ob',
+  'bunker',
   'green',
   'water',
-  'bunker',
   'recovery',
   'fairway',
 ];
