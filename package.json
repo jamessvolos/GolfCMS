@@ -17,7 +17,8 @@
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "content:export": "tsx scripts/export-content.ts"
+    "content:export": "tsx scripts/export-content.ts",
+    "content:audit": "tsx scripts/audit-content.ts"
   },
   "repository": {
     "type": "git",
