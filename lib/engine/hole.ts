@@ -25,7 +25,8 @@ export function prepareHole(hole: HoleData): PreparedHole {
   const tees: Pt[] = [];
   let pin: Pt | null = null;
 
-  for (const feature of hole.geojson.features) {
+  for (let featureIndex = 0; featureIndex < hole.geojson.features.length; featureIndex++) {
+    const feature = hole.geojson.features[featureIndex]!;
     if (feature.geometry.type === 'Point') {
       const [lon, lat] = feature.geometry.coordinates;
       const p = proj.toLocal({ lon: lon!, lat: lat! });
@@ -48,7 +49,11 @@ export function prepareHole(hole: HoleData): PreparedHole {
       if (p.y > maxY) maxY = p.y;
     }
     polygons.push({
+      // Assigned from the feature index BEFORE the priority sort below, so
+      // the id is a stable handle back to the authored polygon.
+      id: featureIndex,
       kind,
+      ...(feature.properties.name ? { name: feature.properties.name } : {}),
       rings,
       bbox: { minX, minY, maxX, maxY },
       geometry: {

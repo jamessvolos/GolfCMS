@@ -11,6 +11,15 @@ import { computeGridSummary } from '@/lib/puzzle/gridSummary';
 import type { GridSummary } from '@/lib/puzzle/gridSummary';
 import type { PuzzleContent } from '@/lib/content/types';
 
+/**
+ * Bump when GridSummary's shape or the engine's numbers change. A cached
+ * grid from an older engine is not just stale, it can be missing fields
+ * downstream code requires — the explanation generator hit exactly this
+ * when `brief` was added. The version rides in the bucket key, so old rows
+ * are simply never read.
+ */
+export const GRID_VERSION = 2;
+
 export interface HeatmapStore {
   get(puzzleId: string, bucket: string): Promise<GridSummary | null>;
   put(puzzleId: string, bucket: string, summary: GridSummary): Promise<void>;
@@ -46,7 +55,7 @@ export async function getOrComputeHeatmap(
   profile: PlayerProfile,
   opts: { nSamples?: number } = {},
 ): Promise<HeatmapResult> {
-  const bucket = profileBucket(profile);
+  const bucket = `v${GRID_VERSION}-${profileBucket(profile)}`;
   const hit = await store.get(content.puzzle.id, bucket);
   if (hit) return { summary: hit, bucket, cached: true };
 

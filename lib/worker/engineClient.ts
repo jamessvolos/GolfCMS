@@ -4,6 +4,7 @@
 
 import type { EvalResult, HoleData, LonLat, PlayerProfile, Pt } from '@/lib/engine/types';
 import type { GridSummary, SituationWire, WorkerRequest, WorkerResponse } from './protocol';
+import type { Note } from '@/lib/explain/types';
 
 type Pending = { resolve: (value: never) => void; reject: (err: Error) => void };
 
@@ -59,6 +60,23 @@ export class EngineClient {
       category,
     } as never);
     return res.summary;
+  }
+
+  /** Generate the caddie's note; the worker owns the prepared hole. */
+  async note(req: {
+    sit: SituationWire;
+    profile: PlayerProfile;
+    category: 'tee' | 'approach' | 'layup' | 'recovery';
+    band: 'perfect' | 'good' | 'okay' | 'miss';
+    sgLoss: number;
+    aim: LonLat;
+    grid: GridSummary;
+  }): Promise<Note> {
+    const res = await this.send<{ type: 'note'; note: Note }>({
+      type: 'note',
+      ...req,
+    } as never);
+    return res.note;
   }
 
   async aim(

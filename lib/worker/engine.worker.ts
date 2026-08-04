@@ -7,6 +7,7 @@
 import { evaluateAim, type Situation } from '@/lib/engine/evaluate';
 import { prepareHole } from '@/lib/engine/hole';
 import { computeGridSummary } from '@/lib/puzzle/gridSummary';
+import { explain } from '@/lib/explain';
 import type { PreparedHole } from '@/lib/engine/types';
 import type { SituationWire, WorkerRequest, WorkerResponse } from './protocol';
 
@@ -38,6 +39,29 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
         nSamples: msg.nSamples,
       });
       post({ type: 'grid', id: msg.id, summary });
+      return;
+    }
+
+    if (msg.type === 'note') {
+      const prep = prepared;
+      const sit = toSituation(prep, msg.sit);
+      const playerAim = prep.toLocal(msg.aim);
+      const playerEval = evaluateAim(prep, sit, msg.profile, playerAim);
+      const note = explain({
+        category: msg.category,
+        lie: sit.lie,
+        band: msg.band,
+        sgLoss: msg.sgLoss,
+        prepared: prep,
+        sit,
+        profile: msg.profile,
+        playerAim,
+        playerEval,
+        grid: msg.grid,
+        evaluate: (aim) => evaluateAim(prep, sit, msg.profile, aim),
+        history: [],
+      });
+      post({ type: 'note', id: msg.id, note });
       return;
     }
 

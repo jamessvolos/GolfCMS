@@ -20,6 +20,8 @@ import { dist } from './projection';
 import { createNormalPairs } from './rng';
 import type {
   EvalResult,
+  FeatureHit,
+  FeatureKind,
   LandingLie,
   PlayableLie,
   PlayerProfile,
@@ -39,6 +41,12 @@ export interface EvalOptions {
   seed?: number;
   /** Pre-generated normal pairs for common random numbers across aims. */
   normals?: Float64Array;
+  /**
+   * Collect the explanation statistics (per-polygon hits, in-play and
+   * on-green distances). Default true; the grid lattice passes false so
+   * thousands of candidate evaluations stay lean.
+   */
+  stats?: boolean;
 }
 
 export function evaluateAim(
@@ -73,12 +81,41 @@ export function evaluateAim(
   let totalCost = 0;
   let totalPinDist = 0;
 
+  // Explanation accumulators, filled in the same pass as the costing.
+  const stats = opts.stats !== false;
+  const hits = new Map<number, { kind: FeatureKind; name?: string; n: number; sx: number; sy: number }>();
+  let inPlayN = 0;
+  let inPlaySum = 0;
+  let greenN = 0;
+  let greenSum = 0;
+
   for (let i = 0; i < n; i++) {
     const landing = landings[i]!;
     const { lie: landingLie, polygon } = classifyPointDetailed(prepared, landing);
     counts[landingLie] = (counts[landingLie] ?? 0) + 1;
     const pinDist = dist(landing, pin);
     totalPinDist += pinDist;
+
+    if (stats) {
+      if (polygon) {
+        let h = hits.get(polygon.id);
+        if (!h) {
+          h = { kind: polygon.kind, name: polygon.name, n: 0, sx: 0, sy: 0 };
+          hits.set(polygon.id, h);
+        }
+        h.n += 1;
+        h.sx += landing.x;
+        h.sy += landing.y;
+      }
+      if (landingLie !== 'water' && landingLie !== 'ob') {
+        inPlayN += 1;
+        inPlaySum += pinDist;
+        if (landingLie === 'green') {
+          greenN += 1;
+          greenSum += pinDist;
+        }
+      }
+    }
 
     let cost: number;
     if (landingLie === 'ob') {
@@ -101,6 +138,19 @@ export function evaluateAim(
     lieBreakdown[k as LandingLie] = v / n;
   }
 
+  const featureHits: FeatureHit[] = stats
+    ? [...hits.entries()]
+        .map(([id, h]) => ({
+          id,
+          kind: h.kind,
+          ...(h.name ? { name: h.name } : {}),
+          n: h.n,
+          fraction: h.n / n,
+          locus: { x: h.sx / h.n, y: h.sy / h.n },
+        }))
+        .sort((a, b) => b.n - a.n)
+    : [];
+
   return {
     expectedStrokes: totalCost / n,
     outcomeStats: {
@@ -110,6 +160,20 @@ export function evaluateAim(
       aimDistance: effectiveDistance,
       clamped,
       nSamples: n,
+      ...(stats
+        ? {
+            featureHits,
+            inPlay: {
+              fraction: inPlayN / n,
+              meanDistanceToPin: inPlayN ? inPlaySum / inPlayN : 0,
+            },
+            onGreen: {
+              fraction: greenN / n,
+              meanDistanceToPin: greenN ? greenSum / greenN : 0,
+            },
+            effAim,
+          }
+        : {}),
     },
   };
 }

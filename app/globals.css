@@ -112,6 +112,15 @@ body {
 .sg-map .maplibregl-ctrl-attrib-button {
   filter: invert(0.9);
 }
+/* Attribution must stay legible and clickable, but it sits in the same
+   corner as the thumb-zone confirm control on a phone. Keep it out of the
+   control's way rather than covering either. */
+@media (max-width: 480px) {
+  .sg-map .maplibregl-ctrl-bottom-left,
+  .sg-map .maplibregl-ctrl-bottom-right {
+    bottom: 62px;
+  }
+}
 
 .sg-ball-marker {
   width: 11px;
@@ -124,6 +133,85 @@ body {
 .sg-aim-marker,
 .sg-pin-marker {
   line-height: 0;
+}
+
+/* ------------------------------------------------- the caddie's note */
+
+.sg-note {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--sg-hairline);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 180ms linear,
+    transform 180ms cubic-bezier(0.2, 0, 0.2, 1);
+}
+.sg-note[data-on] {
+  opacity: 1;
+  transform: none;
+}
+.sg-note-eyebrow {
+  font-family: var(--sg-font-label);
+  font-variant-caps: all-small-caps;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--sg-brass-text);
+  margin-bottom: 6px;
+}
+.sg-note-body {
+  font-family: var(--sg-font-ui);
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--sg-ink);
+  max-width: 46ch;
+  text-wrap: pretty;
+}
+.sg-note-body + .sg-note-body {
+  margin-top: 6px;
+}
+/* Plex Mono runs large and loose beside Archivo; without this correction
+   an inline "25%" reads as a ransom note by the 200th repetition. */
+.sg-note-num {
+  font-family: var(--sg-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.94em;
+  letter-spacing: -0.01em;
+}
+/* Flag red as a rule, never as text colour — a red digit reads as an
+   error state, and flag red already belongs to the player's own stake. */
+.sg-note-key {
+  text-decoration: underline;
+  text-decoration-color: var(--sg-flag);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.sg-note-rule {
+  border: 0;
+  border-top: 1px solid var(--sg-hairline);
+  width: 56px;
+  margin: 14px 0 12px;
+}
+.sg-note-glyph {
+  color: var(--sg-brass-text);
+  margin-right: 6px;
+}
+@media (max-width: 420px) {
+  .sg-note-body {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  .sg-note {
+    padding-top: 14px;
+  }
+}
+[data-instant] .sg-note {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sg-note {
+    transition: none;
+  }
 }
 
 /* Band stamp: Caslon caps, inked at −4°. */

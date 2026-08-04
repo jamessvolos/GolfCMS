@@ -136,7 +136,9 @@ export function evaluateGrid(
       const theta = Math.atan2(p.x - ball.x, p.y - ball.y);
       if (Math.abs(angleDiff(theta, bearing)) > halfAngle) continue;
 
-      const e = evaluateAim(prepared, sit, profile, p, { normals }).expectedStrokes;
+      // Lattice cells never need explanation stats — thousands of them.
+      const e = evaluateAim(prepared, sit, profile, p, { normals, stats: false })
+        .expectedStrokes;
       values[row * width + col] = e;
       if (!best || e < best.expectedStrokes) {
         best = { point: p, expectedStrokes: e };

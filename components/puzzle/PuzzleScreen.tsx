@@ -26,6 +26,8 @@ import type { EllipseSpec, RevealScene } from '@/lib/map/overlayDraw';
 import { EngineClient } from '@/lib/worker/engineClient';
 import type { GridSummary } from '@/lib/worker/protocol';
 import type { ProfileRecord, PuzzleRecord } from '@/lib/server/content';
+import CaddieNote from './CaddieNote';
+import type { Note } from '@/lib/explain/types';
 
 type Phase = 'boot' | 'aiming' | 'plotting' | 'reveal' | 'done' | 'error';
 
@@ -129,6 +131,7 @@ export default function PuzzleScreen({
   const [gridReady, setGridReady] = useState(false);
   const [aimInfo, setAimInfo] = useState<{ distance: number; club: string } | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [note, setNote] = useState<Note | null>(null);
   const [tick, setTick] = useState({ sg: 0, elo: 0 });
   const [stampOn, setStampOn] = useState(false);
 
@@ -494,6 +497,21 @@ export default function PuzzleScreen({
     };
     setOutcome(o);
 
+    // The note is generated off-thread alongside the reveal; it lands with
+    // the stamp beat rather than gating it.
+    engine
+      .note({
+        sit: sitWire,
+        profile: evalProfile,
+        category: puzzle.category,
+        band: o.band,
+        sgLoss,
+        aim,
+        grid,
+      })
+      .then((n) => setNote(n))
+      .catch(() => setNote(null));
+
     if (reduced || skipRef.current) {
       finishReveal(o);
       return;
@@ -561,6 +579,7 @@ export default function PuzzleScreen({
     progressRef.current = { contours: 0, ellipses: 0, labels: 0 };
     setStampOn(false);
     setOutcome(null);
+    setNote(null);
     setTick({ sg: 0, elo: 0 });
     wrapRef.current?.classList.remove('sg-dimmed');
     aimMarkerRef.current?.setDraggable(true);
@@ -715,7 +734,9 @@ export default function PuzzleScreen({
 
       {outcome && (stampOn || phase === 'done') && (
         <div className="mt-4" aria-live="polite">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+          {/* The sentence is the headline; the numbers below are footnotes. */}
+          <CaddieNote note={note} on={stampOn} />
+          <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
             <div>
               <div className="stat-caption">SG loss</div>
               {/* Clamped: you cannot beat the optimal, so a small negative is

@@ -14,6 +14,7 @@ import { bucketedProfile, profileBucket, SEED_PROFILE } from '@/lib/engine/profi
 import { dist } from '@/lib/engine/projection';
 import { puzzleRatingFromTrap } from '@/lib/engine/scoring';
 import { computeGridSummary } from '@/lib/puzzle/gridSummary';
+import { GRID_VERSION } from './heatmap';
 import type {
   HoleData,
   HoleGeoJSON,
@@ -231,7 +232,8 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
     },
   });
 
-  const seedBucket = profileBucket(SEED_PROFILE);
+  // Same versioned key the reader uses, so a warm row is actually a hit.
+  const seedBucket = `v${GRID_VERSION}-${profileBucket(SEED_PROFILE)}`;
   const seedProfile = bucketedProfile(SEED_PROFILE);
   const results: IngestResult['puzzles'] = [];
   const keptIds: string[] = [];

@@ -126,12 +126,31 @@ export interface PuzzleData {
 // ---------------------------------------------------------------------------
 
 export interface ProjectedPolygon {
+  /**
+   * Stable index into hole.geojson.features, assigned BEFORE the
+   * classification-priority sort so it survives reordering.
+   */
+  id: number;
   kind: FeatureKind;
+  /** properties.name verbatim — never case-transformed, never parsed here. */
+  name?: string;
   /** Outer ring followed by hole rings, projected to local yards. */
   rings: Pt[][];
   bbox: { minX: number; minY: number; maxX: number; maxY: number };
   /** Planar GeoJSON geometry (local yards) for turf point-in-polygon. */
   geometry: { type: 'Polygon'; coordinates: number[][][] };
+}
+
+/** Per-polygon attribution of the Monte Carlo samples. */
+export interface FeatureHit {
+  id: number;
+  kind: FeatureKind;
+  name?: string;
+  n: number;
+  /** n / nSamples. */
+  fraction: number;
+  /** Mean of the samples that finished in THIS polygon, local yards. */
+  locus: Pt;
 }
 
 export interface PreparedHole {
@@ -153,7 +172,11 @@ export type LieBreakdown = Partial<Record<LandingLie, number>>;
 export interface OutcomeStats {
   /** Landing-lie percentages (0..1). */
   lieBreakdown: LieBreakdown;
-  /** Mean distance from landing point to pin, yards (all samples). */
+  /**
+   * Mean distance from landing point to pin over ALL samples — water and
+   * OB included, so a drowned ball's distance is averaged in. Fine for
+   * coarse reporting; explanations must use inPlay/onGreen instead.
+   */
   meanDistanceToPin: number;
   /** Club auto-selected for the aim. */
   club: Club;
@@ -162,6 +185,16 @@ export interface OutcomeStats {
   /** True when the requested aim was beyond max club and was clamped. */
   clamped: boolean;
   nSamples: number;
+
+  // --- present unless opts.stats === false (the grid lattice opts out) ---
+  /** Per-polygon attribution, sorted by n descending, empties dropped. */
+  featureHits?: FeatureHit[];
+  /** Samples excluding water and OB — the balls you actually get to play. */
+  inPlay?: { fraction: number; meanDistanceToPin: number };
+  /** Green samples only. Feeds every "leaves you N feet" claim. */
+  onGreen?: { fraction: number; meanDistanceToPin: number };
+  /** The carry-clamped point actually sampled around. */
+  effAim?: Pt;
 }
 
 export interface EvalResult {

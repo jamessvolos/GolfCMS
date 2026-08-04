@@ -18,7 +18,8 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "content:export": "tsx scripts/export-content.ts",
-    "content:audit": "tsx scripts/audit-content.ts"
+    "content:audit": "tsx scripts/audit-content.ts",
+    "explain:golden": "tsx scripts/explain-golden.ts"
   },
   "repository": {
     "type": "git",
