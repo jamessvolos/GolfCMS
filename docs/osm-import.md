@@ -14,6 +14,28 @@ npm run content:import -- --course "Royal Birkdale" --hole 12 --commit
 Or `/admin/import` in the app, which previews first and writes only when you
 say so.
 
+## Survey the course first
+
+```bash
+npm run content:import -- --course "Royal County Down" --survey
+```
+
+Scores every mapped hole and ranks them by whether they contain a decision,
+so content is chosen on merit rather than on fame. This matters more than it
+sounds: across 36 surveyed holes at two championship links, only 9 carried a
+decision, and 8 of those 9 were par 3s. Every long par 4 and par 5 tee shot
+came in at 0.00–0.14 — not because the import was poor, but because for a
+mid-handicap player a 480-yard par 4 has no course-management decision. The
+naive aim IS the optimal aim, and the game would award PERFECT for no
+thought.
+
+The hand-traced library says the same thing: its par 4 tee shots run
+0.01–0.17 with a median near 0.03. This is a property of golf and of the
+engine's player model, not of OpenStreetMap.
+
+Survey sampling is coarse (200 samples) — it ranks holes, it does not rate
+them. The committed rating is recomputed at full precision on ingest.
+
 ## What it actually does
 
 1. **Fetch.** One Overpass query for the course area (or a radius around a
@@ -122,12 +144,11 @@ is a hypothesis rather than a threshold.
   the mapper drew.
 - **One tee.** The importer takes the tee box nearest the centreline's tee
   end. Multiple tee boxes are not modelled.
-- **A clean import is not automatically a good puzzle.** Of eight holes
-  imported from three championship links, five had a trap size of
-  0.00–0.01 — geometrically correct, and with nothing to learn, because
-  aiming at the flag was already optimal. The other three shipped, one of
-  them the best puzzle in the library. See `data/holes-draft/README.md`
-  for the current hypothesis about why, which is not yet settled.
+- **A clean import is not automatically a good puzzle.** Survey first; see
+  above. Widening the corridor does not help and actively hurts — at 220y
+  Carnoustie's 17th produced an "optimal" line 79 yards left of the axis,
+  onto the neighbouring hole's fairway, and the flattering trap size that
+  came with it was measuring the wrong hole.
 - **Import is not a substitute for looking.** Preview, read the notes, and
   play the hole once before trusting it. `--out` writes a draft to
   `data/holes-draft/` for review instead of committing.

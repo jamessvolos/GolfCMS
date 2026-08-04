@@ -52,12 +52,32 @@ describe('elo', () => {
 });
 
 describe('puzzleRatingFromTrap', () => {
-  it('maps trap size onto the rating range with clamping', () => {
+  it('anchors a decisionless puzzle at the base rating', () => {
     expect(puzzleRatingFromTrap(0)).toBe(1000);
-    expect(puzzleRatingFromTrap(0.25)).toBe(1750);
-    expect(puzzleRatingFromTrap(0.5)).toBe(2500);
-    expect(puzzleRatingFromTrap(2)).toBe(2500);
+    // Trap size cannot be negative, but a caller must not be able to push a
+    // rating below the floor if one ever arrives.
     expect(puzzleRatingFromTrap(-0.2)).toBe(1000);
+  });
+
+  it('keeps resolution where most of the library lives', () => {
+    // The shipped library's median trap is ~0.05 and its bulk sits under
+    // 0.20; those must not all land on the same rating.
+    expect(puzzleRatingFromTrap(0.05)).toBe(1188);
+    expect(puzzleRatingFromTrap(0.1)).toBe(1333);
+    expect(puzzleRatingFromTrap(0.2)).toBe(1545);
+  });
+
+  it('never saturates, so difficulty always orders', () => {
+    // The defect this replaced: trap 0.88 and 1.19 both rated exactly 2500,
+    // making the hardest hole in the library indistinguishable from one a
+    // third easier. Every step must be strictly increasing.
+    const traps = [0.5, 0.88, 0.94, 1.19, 2, 5, 50];
+    const ratings = traps.map(puzzleRatingFromTrap);
+    for (let i = 1; i < ratings.length; i++) {
+      expect(ratings[i]!).toBeGreaterThan(ratings[i - 1]!);
+    }
+    // And it approaches the ceiling without ever reaching it.
+    expect(ratings[ratings.length - 1]!).toBeLessThan(2500);
   });
 });
 

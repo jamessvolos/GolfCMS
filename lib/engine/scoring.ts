@@ -9,7 +9,7 @@ import {
   MISS_ELO_SCORE,
   PUZZLE_RATING_BASE,
   PUZZLE_RATING_SPAN,
-  PUZZLE_RATING_TRAP_REF,
+  PUZZLE_RATING_HALF_TRAP,
   SCORE_BANDS,
 } from './constants';
 import type { ScoreBandResult } from './types';
@@ -41,6 +41,9 @@ export function eloDeltas(
 
 /** Seed a puzzle's rating from its trap size: subtle traps = hard puzzles. */
 export function puzzleRatingFromTrap(trapSize: number): number {
-  const t = Math.min(1, Math.max(0, trapSize / PUZZLE_RATING_TRAP_REF));
+  const trap = Math.max(0, trapSize);
+  // Saturating but never saturated: strictly increasing for every trap, so
+  // two puzzles of different difficulty never share a rating.
+  const t = trap / (trap + PUZZLE_RATING_HALF_TRAP);
   return Math.round(PUZZLE_RATING_BASE + PUZZLE_RATING_SPAN * t);
 }

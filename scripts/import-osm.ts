@@ -4,6 +4,7 @@
  *   npm run content:import -- --course "Royal Birkdale" --hole 12
  *   npm run content:import -- --near 26.0,-80.1 --hole 18 --commit
  *   npm run content:import -- --file saved.json --hole 12 --course "Birkdale"
+ *   npm run content:import -- --course "Royal Birkdale" --survey
  *
  * Dry-run by default: it prints what it found, what it threw away, and the
  * derived puzzles, and writes nothing. `--commit` sends it through the same
@@ -26,6 +27,7 @@ import {
 } from '@/lib/content/osm/import';
 import type { ImportRequest } from '@/lib/content/osm/import';
 import { queryAround, queryCourse, OverpassError } from '@/lib/content/osm/overpass';
+import { DECISION_THRESHOLD, SURVEY_SAMPLES, surveyCourse } from '@/lib/content/osm/survey';
 import type { OverpassResponse } from '@/lib/content/osm/overpass';
 import { ingestHole } from '@/lib/server/ingestHole';
 
@@ -35,8 +37,10 @@ function arg(name: string): string | undefined {
 }
 const flag = (name: string) => process.argv.includes(`--${name}`);
 
+const isSurvey = process.argv.includes('--survey');
 const holeNumber = Number(arg('hole'));
-if (!Number.isInteger(holeNumber) || holeNumber < 1 || holeNumber > 18) {
+// --survey scores the whole course, so it has no single hole to name.
+if (!isSurvey && (!Number.isInteger(holeNumber) || holeNumber < 1 || holeNumber > 18)) {
   console.error('--hole <1-18> is required');
   process.exit(1);
 }
@@ -61,7 +65,7 @@ if (!course && !near && !file) {
 }
 
 const req: ImportRequest = {
-  holeNumber,
+  holeNumber: Number.isInteger(holeNumber) ? holeNumber : 1,
   ...(course ? { course } : {}),
   ...(near ? { near } : {}),
   ...(arg('id') ? { id: arg('id')! } : {}),
@@ -71,11 +75,74 @@ const req: ImportRequest = {
   ...(arg('samples') ? { nSamples: Number(arg('samples')) } : {}),
 };
 
-if (flag('query')) {
+/**
+ * --survey scores every mapped hole on the course and ranks them, so you
+ * import by decision rather than by fame. See lib/content/osm/survey.ts.
+ */
+async function survey() {
+  const res = file
+    ? (JSON.parse(readFileSync(file, 'utf8')) as OverpassResponse)
+    : await fetchCourse({ ...req, holeNumber: 1 });
+  const name = arg('name') ?? course ?? 'Unknown course';
+  console.log(`\nSurveying ${name} — trap size per hole, ${SURVEY_SAMPLES} samples\n`);
+  console.log('  #   par  yards   best trap   puzzles');
+
+  const rows = surveyCourse(res, name, {
+    ...(arg('corridor') ? { corridorYds: Number(arg('corridor')) } : {}),
+    onRow(r) {
+      if (r.error) {
+        console.log(`  ${String(r.holeNumber).padStart(2)}   —      —           —   ${r.error}`);
+        for (const a of r.ambiguous ?? []) console.log(`         · ${a}`);
+        return;
+      }
+      const mark = r.bestTrap >= DECISION_THRESHOLD ? '✓' : ' ';
+      console.log(
+        `  ${String(r.holeNumber).padStart(2)}   ${r.par}   ${String(r.yards).padStart(4)}` +
+          `   ${r.bestTrap.toFixed(2).padStart(6)} ${mark}   ` +
+          r.traps.map((t) => `${t.category} ${t.trap.toFixed(2)}`).join('  '),
+      );
+    },
+  });
+
+  const worth = rows
+    .filter((r) => !r.error && r.bestTrap >= DECISION_THRESHOLD)
+    .sort((a, b) => b.bestTrap - a.bestTrap);
+  console.log(
+    `\n${worth.length} of ${rows.filter((r) => !r.error).length} assembled holes carry a ` +
+      `decision (trap ≥ ${DECISION_THRESHOLD}):`,
+  );
+  for (const r of worth) {
+    console.log(
+      `  hole ${String(r.holeNumber).padStart(2)}  par ${r.par}  ${String(r.yards).padStart(3)}y` +
+        `  trap ${r.bestTrap.toFixed(2)}`,
+    );
+  }
+  console.log('\n  Import one with --hole N. Survey sampling is coarse; the');
+  console.log('  committed rating is recomputed at full precision on ingest.');
+}
+
+if (flag('survey')) {
+  survey().catch((err) => {
+    console.error(String(err));
+    process.exit(1);
+  });
+} else if (flag('query')) {
   // Print the Overpass QL and stop — for running the query by hand
   // somewhere with network access.
   console.log(course ? queryCourse(course) : queryAround(near!.lat, near!.lon, req.radius ?? 500));
   process.exit(0);
+} else {
+  main().catch((err) => {
+    if (err instanceof OverpassError) {
+      console.error(`\nOverpass: ${err.message}`);
+      console.error('Tip: --query prints the query to run elsewhere, then --file imports the result.');
+    } else if (err instanceof AssembleError) {
+      console.error(`\nCannot import this hole: ${err.message}`);
+    } else {
+      console.error(err);
+    }
+    process.exit(1);
+  });
 }
 
 async function main() {
@@ -141,14 +208,3 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  if (err instanceof OverpassError) {
-    console.error(`\nOverpass: ${err.message}`);
-    console.error('Tip: --query prints the query to run elsewhere, then --file imports the result.');
-  } else if (err instanceof AssembleError) {
-    console.error(`\nCannot import this hole: ${err.message}`);
-  } else {
-    console.error(err);
-  }
-  process.exit(1);
-});

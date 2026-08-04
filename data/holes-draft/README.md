@@ -48,7 +48,7 @@ Three of eight imported holes did clear the bar and ship: `county-down-4`
 (trap 0.88, the best puzzle in the library by a distance), `birkdale-12`
 (0.44) and `carnoustie-17` (0.14).
 
-### Why — the leading hypothesis, not yet tested
+### Why — tested, and it was not the corridor
 
 It is NOT that the engine cannot express severe ground. It has two penal
 tiers below fairway: `rough` (sigma ×1.25, 2.55 strokes at the short end)
@@ -56,17 +56,28 @@ and `recovery` (×1.40, 3.40) — nearly a full stroke apart. All five benched
 holes except `carnoustie-18` carry recovery polygons, so the gorse is
 arriving.
 
-The likelier cause is the **80-yard import corridor**. Everything outside it
-is discarded, and unclassified ground is rough by definition — so a shot
-100 yards offline into actual gorse is scored as ordinary rough, a stroke
-cheaper than the ground it is really in. That flattens the penalty field
-exactly where a links hole's decision lives, and these holes have broad
-fairways (`county-down-9` imported eight fairway polygons, `carnoustie-18`
-eight) which flattens it further.
+The corridor was the leading suspect and it was wrong. Sweeping 80/120/160/
+220 yards across all eight holes moved five of them not at all
+(`birkdale-6` 0.01 → 0.01 → 0.01 → 0.01). The two that did jump were
+artefacts: at 220y Carnoustie's 17th put its "optimal" line 79 yards left
+of the tee→pin axis, on the neighbouring hole's fairway, and Carnoustie's
+12th imported 88 polygons for one hole. Widening does not add penalty
+field, it adds someone else's golf course.
 
-Cheap test before doing anything else: re-import these five at a 150y
-corridor and see whether trap size recovers. If it does, the corridor
-constant is the bug and every future import improves with it. If it does
-not, the diagnosis moves to the engine's penalty model or to the missing
-out-of-bounds — `golf=out_of_bounds` exists in OSM and is almost never
-used.
+The real answer is that these holes genuinely have no decision in them for
+a mid-handicap player. Surveying all 18 holes at both courses
+(`--survey`) found 9 of 36 carrying a decision, and 8 of those 9 were par
+3s. The hand-traced library agrees — its par 4 tee shots run 0.01–0.17,
+median about 0.03. On a 480-yard par 4 you hit driver at the widest part
+of the fairway; that is what the naive aim already does.
+
+So these five stay benched, and the lesson is about selection rather than
+extraction: survey a course, import its par 3s and its short strategic
+holes, and do not expect a famous long hole to be a good puzzle.
+
+One open thread worth someone's time: every derived *approach* puzzle also
+came in near 0.00, on good holes as well as flat ones. That is likely
+`derivePuzzles` placing the approach ball at the previous shot's optimal
+aim — the ideal position, from which the approach is by construction
+easiest. Deriving it from a dispersed outcome instead would probably
+produce the awkward positions that make approach puzzles interesting.

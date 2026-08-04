@@ -216,10 +216,25 @@ export const ELO_K_PLAYER = 24;
 export const ELO_K_PUZZLE = 16;
 export const ELO_INITIAL_PLAYER = 1200;
 
-/** Puzzle rating seed: 1000 + 1500 × clamp(trapSize / 0.5, 0, 1). */
+/**
+ * Puzzle rating seed: 1000 + 1500 × trap / (trap + 0.35).
+ *
+ * Was `clamp(trap / 0.5, 0, 1)` — linear to a hard ceiling at trap 0.5.
+ * That was fine while the library topped out at 0.19, and became a real
+ * defect once imported par 3s reached 1.19: four puzzles spanning
+ * 0.88–1.19 all rated exactly 2500, so the hardest hole in the library was
+ * indistinguishable from one a third easier. Elo cannot order puzzles it
+ * cannot tell apart, and the queue cannot pace them.
+ *
+ * The replacement is strictly increasing everywhere, so no two different
+ * trap sizes ever collide, and it approaches 2500 without reaching it.
+ * HALF_TRAP is the trap size that earns half the span: at 0.35 the typical
+ * puzzle (trap ~0.05) sits near 1190 and a severe one (0.9) near 2080,
+ * which keeps resolution where most of the library actually lives.
+ */
 export const PUZZLE_RATING_BASE = 1000;
 export const PUZZLE_RATING_SPAN = 1500;
-export const PUZZLE_RATING_TRAP_REF = 0.5;
+export const PUZZLE_RATING_HALF_TRAP = 0.35;
 
 // ---------------------------------------------------------------------------
 // Profile bucketing (heatmap cache key)
