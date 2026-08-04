@@ -571,20 +571,6 @@
   },
   "puzzles": [
     {
-      "id": "cape-01-tee",
-      "ball": {
-        "lon": -93.335,
-        "lat": 41.02
-      },
-      "pin": {
-        "lon": -93.334455642,
-        "lat": 41.023269235
-      },
-      "lie": "tee",
-      "category": "tee",
-      "description": "Tee shot, 401y par 4, water right, bunkers and OB left"
-    },
-    {
       "id": "cape-01-approach",
       "ball": {
         "lon": -93.335087097,
@@ -597,6 +583,20 @@
       "lie": "fairway",
       "category": "approach",
       "description": "Approach from 157y, pin cut toward the lake"
+    },
+    {
+      "id": "cape-01-tee",
+      "ball": {
+        "lon": -93.335,
+        "lat": 41.02
+      },
+      "pin": {
+        "lon": -93.334455642,
+        "lat": 41.023269235
+      },
+      "lie": "tee",
+      "category": "tee",
+      "description": "Tee shot, 401y par 4, water right, bunkers and OB left"
     }
   ]
 }

@@ -7,7 +7,7 @@
     "yardage": 467,
     "imageryCenter": {
       "lon": -2.810654,
-      "lat": 56.344579350000004
+      "lat": 56.34457935
     },
     "groundPlan": false,
     "polygons": [
@@ -86,7 +86,7 @@
         ]
       },
       {
-        "kind": "ob",
+        "kind": "recovery",
         "name": "road and wall",
         "ring": [
           [
