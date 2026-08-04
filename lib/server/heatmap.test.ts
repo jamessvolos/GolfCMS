@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getOrComputeHeatmap, MemoryHeatmapStore } from './heatmap';
+import { getOrComputeHeatmap, GRID_VERSION, MemoryHeatmapStore } from './heatmap';
 import { capeHole, CAPE_APPROACH } from '@/lib/engine/holes/cape';
 import { prepareHole } from '@/lib/engine/hole';
 import type { PuzzleContent } from '@/lib/content/types';
@@ -30,7 +30,9 @@ describe('getOrComputeHeatmap', () => {
 
     const first = await getOrComputeHeatmap(store, content, p, FAST);
     expect(first.cached).toBe(false);
-    expect(first.bucket).toBe('h15-s110-draw');
+    // The key carries GRID_VERSION so a grid from an older engine — which
+    // may lack fields downstream code requires — is never read back.
+    expect(first.bucket).toBe(`v${GRID_VERSION}-h15-s110-draw`);
     expect(first.summary.contours.levels.length).toBeGreaterThan(0);
     expect(store.size).toBe(1);
 
@@ -86,7 +88,7 @@ describe('getOrComputeHeatmap', () => {
     );
     expect(fade.cached).toBe(false);
     expect(wideBucket.cached).toBe(false);
-    expect(wideBucket.bucket).toBe('h25-s110-draw');
+    expect(wideBucket.bucket).toBe(`v${GRID_VERSION}-h25-s110-draw`);
     expect(store.size).toBe(3);
   });
 
