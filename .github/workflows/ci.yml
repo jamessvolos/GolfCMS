@@ -76,11 +76,10 @@ jobs:
       # puzzles), so the budget here is generous rather than tight.
       - name: Smoke-test the image
         run: |
-          mkdir -p "$PWD/.docker-data"
-          docker run -d --name sg -p 3000:3000 \
-            -e DATABASE_URL="file:/data/sg.db" \
-            -v "$PWD/.docker-data:/data" \
-            sg-trainer:ci
+          # A named volume, matching what docs/deploy.md tells people to run.
+          # A bind mount would keep the runner's ownership of the host dir and
+          # /data would not be writable by the image's `node` user.
+          docker run -d --name sg -p 3000:3000 -v sg-data:/data sg-trainer:ci
           for i in $(seq 1 90); do
             if curl -fsS http://localhost:3000/ | grep -q "SG Trainer"; then
               echo "served the hole listing after ${i}s"; exit 0

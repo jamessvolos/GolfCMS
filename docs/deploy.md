@@ -28,6 +28,14 @@ docker build -t sg-trainer .
 docker run -p 3000:3000 -v sg-data:/data sg-trainer
 ```
 
+Use a **named volume**, as above. The container runs as the unprivileged
+`node` user, and a bind-mounted host directory keeps the host's ownership —
+which the image's `chown` cannot change — so `/data` ends up unwritable and
+the database cannot be created. The entrypoint checks for this and says so
+rather than letting Prisma fail with a bare "unable to open database file".
+If you do need a bind mount, `chown` the host directory to uid 1000 or run
+with `--user $(id -u):$(id -g)`.
+
 First boot applies migrations and seeds 10 holes / 26 puzzles from
 `data/holes/*.json`, warming a heatmap grid per puzzle at the seed profile
 (~14s). Restarts re-run both: `migrate deploy` finds nothing pending and the
