@@ -80,11 +80,15 @@ out geom;`;
  * actually has: "Royal Birkdale, hole 12". The course area is resolved
  * first, then features are taken from inside it.
  */
-export function queryCourse(name: string, radius = 4000): string {
+export function queryCourse(name: string): string {
   const escaped = name.replace(/["\\]/g, '\\$&');
   const features = FEATURE_FILTER.map(
     (f) => `  way${f}(area.course);\n  relation${f}(area.course);`,
   ).join('\n');
+  // The second pair of statements emits the matched course outlines
+  // themselves. Without them an empty result is ambiguous: no course by that
+  // name, or a course mapped as an outline and nothing else? Those need
+  // different advice, so the caller gets to tell them apart.
   return `[out:json][timeout:90];
 area["leisure"="golf_course"]["name"~"${escaped}",i]->.course;
 (
@@ -92,7 +96,29 @@ ${features}
   node["golf"="pin"](area.course);
   way["golf"="hole"](area.course);
 );
-out geom;`;
+out geom;
+way["leisure"="golf_course"]["name"~"${escaped}",i];
+out tags center;
+relation["leisure"="golf_course"]["name"~"${escaped}",i];
+out tags center;`;
+}
+
+/** Course outlines the name search matched, for disambiguation messages. */
+export function matchedCourses(
+  res: OverpassResponse,
+): { id: string; name: string; lat?: number; lon?: number }[] {
+  const out: { id: string; name: string; lat?: number; lon?: number }[] = [];
+  for (const el of res.elements) {
+    if (el.type === 'node') continue;
+    if (el.tags?.leisure !== 'golf_course') continue;
+    const centre = (el as { center?: { lat: number; lon: number } }).center;
+    out.push({
+      id: `${el.type}/${el.id}`,
+      name: el.tags.name ?? '(unnamed)',
+      ...(centre ? { lat: centre.lat, lon: centre.lon } : {}),
+    });
+  }
+  return out;
 }
 
 export function isLocal(url: string): boolean {

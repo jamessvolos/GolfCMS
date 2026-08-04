@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IngestInput } from '@/lib/server/ingestHole';
-import type { OverpassResponse, OsmElement } from './overpass';
+import type { OverpassResponse, OsmElement, OsmWay } from './overpass';
 
 const KIND_TO_TAGS: Record<string, Record<string, string>> = {
   fairway: { golf: 'fairway' },
@@ -95,6 +95,43 @@ export function overpassFromHole(input: IngestInput): OverpassResponse {
 }
 
 // --------------------------------------------------------------- messy fixture
+
+/**
+ * Two courses whose hole numbers collide, one of them on another continent.
+ *
+ * Not hypothetical: an Overpass name search for "Carnoustie" returns four
+ * ways tagged `golf=hole` with `ref=12` — three Carnoustie courses plus a
+ * course in British Columbia — and taking the first produced a confidently
+ * labelled hole from the wrong hemisphere.
+ */
+export function collidingCourses(base: OverpassResponse): OverpassResponse {
+  const holeWay = base.elements.find((e) => e.tags?.golf === 'hole') as OsmWay;
+  const decoy: OsmWay = {
+    type: 'way',
+    id: 99001,
+    tags: { golf: 'hole', ref: holeWay.tags!.ref!, name: 'Impostor', par: '4' },
+    // Same hole number, ~9000km away.
+    geometry: (holeWay.geometry ?? []).map((g) => ({ lat: g.lat + 23, lon: g.lon - 42 })),
+  };
+  return { elements: [decoy, ...base.elements] };
+}
+
+/** A course whose outline is mapped but whose holes are not. */
+export const OUTLINE_ONLY: OverpassResponse = {
+  elements: [
+    {
+      type: 'way',
+      id: 7001,
+      tags: { leisure: 'golf_course', name: 'Sketchy Park GC' },
+      geometry: [
+        { lon: -3, lat: 55 },
+        { lon: -2.99, lat: 55 },
+        { lon: -2.99, lat: 55.01 },
+        { lon: -3, lat: 55 },
+      ],
+    },
+  ],
+};
 
 /** Rectangle helper: metres-ish offsets from a corner, in degrees. */
 function rect(lon: number, lat: number, w: number, h: number) {

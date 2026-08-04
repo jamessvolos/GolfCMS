@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { previewFromResponse, slugify } from './import';
 import { isLocal } from './overpass';
 import { AssembleError } from './assemble';
-import { MESSY_COURSE, loadHole, overpassFromHole } from './fixtures';
+import {
+  collidingCourses,
+  loadHole,
+  MESSY_COURSE,
+  OUTLINE_ONLY,
+  overpassFromHole,
+} from './fixtures';
 import { holeDataFromInput } from '@/lib/server/ingestHole';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
 
@@ -93,6 +99,44 @@ describe('previewFromResponse', () => {
     expect(classifyPoint(after, after.toLocal({ lon: cx, lat: cy }))).toBe(
       classifyPoint(before, before.toLocal({ lon: cx, lat: cy })),
     );
+  });
+
+  it('refuses an ambiguous hole rather than guessing a continent', () => {
+    const colliding = collidingCourses(MESSY_COURSE);
+    let err: Error | undefined;
+    try {
+      previewFromResponse(colliding, { holeNumber: 7, course: 'Messy Links', ...FAST });
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeInstanceOf(AssembleError);
+    // The message has to be actionable: which candidates, and where they are.
+    expect(err!.message).toMatch(/ambiguous — 2 candidates/);
+    expect(err!.message).toMatch(/Impostor/);
+    expect(err!.message).toMatch(/--near/);
+  });
+
+  it('resolves the ambiguity when given a point on the intended hole', () => {
+    const colliding = collidingCourses(MESSY_COURSE);
+    const preview = previewFromResponse(colliding, {
+      holeNumber: 7,
+      course: 'Messy Links',
+      near: { lat: 26.0, lon: -80.0 },
+      ...FAST,
+    });
+    // The real hole is a 400y par 4; the impostor is 23° of latitude away.
+    expect(preview.measuredYards).toBeGreaterThan(390);
+    expect(preview.notes.join(' ')).not.toMatch(/Impostor/);
+  });
+
+  it('tells an unmapped course apart from an unknown one', () => {
+    expect(() =>
+      previewFromResponse(OUTLINE_ONLY, { holeNumber: 1, course: 'Sketchy Park', ...FAST }),
+    ).toThrow(/none has its holes mapped/);
+
+    expect(() =>
+      previewFromResponse({ elements: [] }, { holeNumber: 1, course: 'Nowhere GC', ...FAST }),
+    ).toThrow(/no golf course matches that name/);
   });
 
   it('names the hole from an explicit id when one is given', () => {

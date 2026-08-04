@@ -5,9 +5,9 @@
  * warming that a hand-traced hole gets. There is no second way in.
  */
 
-import { assembleHole, findHoleWay, AssembleError } from './assemble';
+import { assembleHole, describeCandidate, findHoleWays, AssembleError } from './assemble';
 import { derivePuzzles } from './puzzles';
-import { queryAround, queryCourse, runQuery } from './overpass';
+import { matchedCourses, queryAround, queryCourse, runQuery } from './overpass';
 import type { OverpassResponse } from './overpass';
 import { ingestHole, ingestSchema } from '@/lib/server/ingestHole';
 import type { IngestInput, IngestResult } from '@/lib/server/ingestHole';
@@ -58,15 +58,39 @@ export async function fetchCourse(req: ImportRequest): Promise<OverpassResponse>
  * what makes it testable without Overpass.
  */
 export function previewFromResponse(res: OverpassResponse, req: ImportRequest): ImportPreview {
-  const way = findHoleWay(res, { holeNumber: req.holeNumber, near: req.near });
-  if (!way) {
+  const candidates = findHoleWays(res, { holeNumber: req.holeNumber, near: req.near });
+  if (!candidates.length) {
     const mapped = res.elements.filter((e) => e.tags?.golf === 'hole').length;
+    if (mapped) {
+      throw new AssembleError(
+        `hole ${req.holeNumber} is not among the ${mapped} mapped here`,
+      );
+    }
+    const courses = matchedCourses(res);
     throw new AssembleError(
-      mapped
-        ? `hole ${req.holeNumber} is not among the ${mapped} mapped on this course`
-        : 'no golf=hole centrelines are mapped here — the course cannot be imported',
+      courses.length
+        ? `${courses.length} course(s) match that name (${courses
+            .map((c) => c.name)
+            .join(', ')}) but none has its holes mapped — only the outline. ` +
+          'Trace this one by hand.'
+        : 'no golf course matches that name in OpenStreetMap — check the spelling ' +
+          'as OSM has it, or use a point on the hole instead.',
     );
   }
+
+  // More than one candidate and nothing to choose with. Refusing is the only
+  // honest option: a name search spans the whole planet, and multi-course
+  // venues reuse hole numbers, so "the first one" is a coin flip presented
+  // as a fact.
+  if (candidates.length > 1 && !req.near) {
+    throw new AssembleError(
+      `hole ${req.holeNumber} is ambiguous — ${candidates.length} candidates:\n` +
+        candidates.map((c) => `  · ${describeCandidate(c)}`).join('\n') +
+        '\nPick one by passing a point on it (--near lat,lon), or narrow the ' +
+        'course name to match a single course in OpenStreetMap.',
+    );
+  }
+  const way = candidates[0]!;
 
   const courseName = req.courseName ?? req.course ?? 'Unknown course';
   const { input, measuredYards, notes } = assembleHole(res, way, {

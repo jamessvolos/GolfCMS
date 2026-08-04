@@ -155,43 +155,63 @@ function toPolygon(f: CandidateFeature): Feature<Polygon> {
   return turfPolygon([f.outer, ...f.holes]);
 }
 
-/** Pick the `golf=hole` way for a hole number, or the one nearest a point. */
+/**
+ * Every `golf=hole` way that could be the requested hole, nearest first when
+ * a point is given.
+ *
+ * Deliberately plural. A name search matches courses by substring anywhere
+ * on Earth, and a venue like Carnoustie has three courses sharing hole
+ * numbers — so "Carnoustie hole 12" really did resolve to four candidates,
+ * the first of which was a course in British Columbia. Returning the first
+ * match produced a confidently-labelled hole from the wrong continent.
+ * Callers must decide what to do with more than one.
+ */
+export function findHoleWays(
+  res: OverpassResponse,
+  opts: { holeNumber?: number; near?: LonLat },
+): OsmWay[] {
+  const holes = res.elements.filter(
+    (e): e is OsmWay => e.type === 'way' && e.tags?.golf === 'hole' && !!e.geometry?.length,
+  );
+  if (!holes.length) return [];
+
+  let matches = holes;
+  if (opts.holeNumber !== undefined) {
+    const want = String(opts.holeNumber);
+    const byRef = holes.filter((h) => (h.tags?.ref ?? '').trim() === want);
+    // Some courses put the number only in the name: "12. Southward Ho",
+    // "(12) Heather". Only consulted when no ref matches, so a course that
+    // tags refs properly is never diluted by another's naming.
+    const byName = holes.filter((h) =>
+      new RegExp(`(^|\\D)${want}(\\D|$)`).test(h.tags?.name ?? ''),
+    );
+    matches = byRef.length ? byRef : byName;
+  }
+  if (!matches.length) return [];
+
+  if (opts.near) {
+    const near = opts.near;
+    const dist = (h: OsmWay) =>
+      Math.min(...h.geometry!.map((g) => yardsBetween(near, ll(g))));
+    return [...matches].sort((a, b) => dist(a) - dist(b));
+  }
+  return matches;
+}
+
+/** A candidate's identifying detail, for an error a person can act on. */
+export function describeCandidate(way: OsmWay): string {
+  const g = way.geometry![0]!;
+  const name = way.tags?.name ?? way.tags?.ref ?? '(unnamed)';
+  const par = way.tags?.par ? `par ${way.tags.par}` : 'par unknown';
+  return `way/${way.id} "${name}" (${par}) at ${g.lat.toFixed(4)},${g.lon.toFixed(4)}`;
+}
+
+/** Back-compat single-result helper; prefer findHoleWays. */
 export function findHoleWay(
   res: OverpassResponse,
   opts: { holeNumber?: number; near?: LonLat },
 ): OsmWay | null {
-  const holes = res.elements.filter(
-    (e): e is OsmWay => e.type === 'way' && e.tags?.golf === 'hole' && !!e.geometry?.length,
-  );
-  if (!holes.length) return null;
-
-  if (opts.holeNumber !== undefined) {
-    const want = String(opts.holeNumber);
-    const byRef = holes.find((h) => (h.tags?.ref ?? h.tags?.name ?? '').trim() === want);
-    if (byRef) return byRef;
-    // Some courses put the number only in the name: "Hole 12", "12th".
-    const loose = holes.find((h) =>
-      new RegExp(`(^|\\D)${want}(\\D|$)`).test(h.tags?.name ?? ''),
-    );
-    if (loose) return loose;
-    if (!opts.near) return null;
-  }
-
-  if (opts.near) {
-    let best: OsmWay | null = null;
-    let bestD = Infinity;
-    for (const h of holes) {
-      for (const g of h.geometry!) {
-        const d = yardsBetween(opts.near, ll(g));
-        if (d < bestD) {
-          bestD = d;
-          best = h;
-        }
-      }
-    }
-    return best;
-  }
-  return null;
+  return findHoleWays(res, opts)[0] ?? null;
 }
 
 export function assembleHole(
@@ -356,15 +376,32 @@ export function assembleHole(
   // route the optimal line across them.
   const kept: CandidateFeature[] = [];
   let dropped = 0;
+  let foreignGreens = 0;
   for (const c of candidates) {
     if (c === green) {
       kept.push(c);
       continue;
     }
-    if (booleanIntersects(corridor, toPolygon(c))) kept.push(c);
-    else dropped++;
+    if (!booleanIntersects(corridor, toPolygon(c))) {
+      dropped++;
+      continue;
+    }
+    // A hole has exactly one green. On a links routing where holes run
+    // parallel forty yards apart, the corridor catches the neighbours' —
+    // and a foreign green is not a feature of this hole, it is a putting
+    // surface the engine would treat as this hole's target. Carnoustie's
+    // 12th came back with seven. They classify as rough, like any other
+    // closely-mown ground the mapper did not call fairway.
+    if (c.kind === 'green') {
+      foreignGreens++;
+      continue;
+    }
+    kept.push(c);
   }
   if (dropped) notes.push(`${dropped} mapped feature(s) fell outside the ${corridorYds}y corridor`);
+  if (foreignGreens) {
+    notes.push(`${foreignGreens} green(s) belonging to other holes were discarded`);
+  }
 
   // Deduplicate the common double-tagging (a pond as both way and relation)
   // by dropping any feature of the same kind whose outer ring is contained
