@@ -29,7 +29,11 @@ Full product spec: [docs/spec.md](docs/spec.md)
   `data/holes/*.json` (Sawgrass 17 & 18, Pebble 8 & 18, Bay Hill 18,
   Scottsdale 17, Harbour Town 18, Doral 18, the Road Hole, plus the
   synthetic cape fixture).
-- ⏳ Milestone 5 — Elo queue, XP, streaks, session summary.
+- ✅ **Milestone 5 — progression.** `/play` serves puzzles near your rating
+  (±150, widening as needed); XP by band with an upset bonus, levels every
+  500 XP, inked tally-mark streaks, per-category accuracy, and a `/summary`
+  folio card with the 1px ink rating sparkline.
+- ⏳ Milestone 6 — explanation generator.
 
 ## Content
 

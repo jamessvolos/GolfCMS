@@ -1,11 +1,18 @@
 import Link from 'next/link';
 import { getProfile, listPuzzles } from '@/lib/server/content';
 import { profileBucket } from '@/lib/engine/profile';
+import { getProgress } from '@/lib/server/progress';
+import TallyStreak from '@/components/progress/TallyStreak';
+import Sparkline from '@/components/progress/Sparkline';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const [profile, puzzles] = await Promise.all([getProfile(), listPuzzles()]);
+  const [profile, puzzles, progress] = await Promise.all([
+    getProfile(),
+    listPuzzles(),
+    getProgress(),
+  ]);
 
   return (
     <main className="mx-auto max-w-3xl px-5 py-12">
@@ -22,8 +29,43 @@ export default async function Home() {
         </p>
       </header>
 
+      <section className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-4">
+        <Link
+          href="/play"
+          className="grid min-h-12 place-items-center rounded-folio bg-ink px-7 font-ui text-[15px] font-medium text-paper"
+        >
+          {progress.totals.attempts ? 'Next puzzle' : 'Start training'} →
+        </Link>
+        <div>
+          <div className="stat-caption">Rating</div>
+          <div className="mono-nums text-[20px] font-semibold leading-tight">{profile.elo}</div>
+        </div>
+        <div>
+          <div className="stat-caption">Level {progress.level.level}</div>
+          <div className="mono-nums text-[20px] font-semibold leading-tight">{profile.xp} XP</div>
+        </div>
+        <div>
+          <div className="stat-caption">Streak</div>
+          <div className="mt-0.5">
+            <TallyStreak groups={progress.profile.tally} days={progress.profile.streak} />
+          </div>
+        </div>
+        {progress.ratingHistory.length > 1 && (
+          <div className="ml-auto">
+            <Sparkline values={progress.ratingHistory} width={140} height={34} />
+          </div>
+        )}
+      </section>
+
       <section className="mt-10">
-        <div className="stat-caption">The folio</div>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="stat-caption">The folio</div>
+          {progress.totals.attempts > 0 && (
+            <Link href="/summary" className="mono-nums text-[12px] text-ink-soft hover:text-ink">
+              session summary →
+            </Link>
+          )}
+        </div>
         {puzzles.length === 0 ? (
           <div className="mt-3 rounded-folio border border-hairline bg-paper px-5 py-6">
             <p className="text-[14.5px]">No holes in the folio yet.</p>

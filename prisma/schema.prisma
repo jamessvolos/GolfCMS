@@ -21,6 +21,10 @@ model Profile {
   elo       Int       @default(1200)
   xp        Int       @default(0)
   streak    Int       @default(0)
+  /// Local calendar day (YYYY-MM-DD) of the last recorded attempt.
+  lastPlayedDay String?
+  /// Longest streak ever reached, so a reset doesn't erase the record.
+  bestStreak Int      @default(0)
   updatedAt DateTime  @updatedAt
   attempts  Attempt[]
 }
@@ -62,6 +66,9 @@ model Attempt {
   sgLoss    Float
   band      String // perfect | good | okay | miss
   eloDelta  Int
+  /// XP awarded, and the player rating AFTER this attempt (for the sparkline).
+  xpGained  Int      @default(0)
+  ratingAfter Int    @default(1200)
   createdAt DateTime @default(now())
   puzzle    Puzzle   @relation(fields: [puzzleId], references: [id])
   profile   Profile  @relation(fields: [profileId], references: [id])

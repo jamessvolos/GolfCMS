@@ -43,6 +43,16 @@ interface Outcome {
   practice: boolean;
   /** False when the attempt POST failed and no rating change happened. */
   recorded: boolean;
+  /** Progression, present only on a recorded attempt. */
+  progression?: {
+    xpGained: number;
+    level: number;
+    leveledUp: boolean;
+    streak: number;
+    streakExtended: boolean;
+  };
+  /** Queue's choice for what to play next. */
+  nextId?: string | null;
 }
 
 interface AttemptResponse {
@@ -53,6 +63,13 @@ interface AttemptResponse {
   eloDelta: number;
   newRating: number;
   puzzleRating: number;
+  xpGained: number;
+  xp: number;
+  level: number;
+  leveledUp: boolean;
+  streak: number;
+  streakExtended: boolean;
+  nextPuzzleId: string | null;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -462,6 +479,18 @@ export default function PuzzleScreen({
       puzzleRating: attempt?.puzzleRating ?? puzzle.rating,
       practice,
       recorded: attempt !== null,
+      ...(attempt
+        ? {
+            progression: {
+              xpGained: attempt.xpGained,
+              level: attempt.level,
+              leveledUp: attempt.leveledUp,
+              streak: attempt.streak,
+              streakExtended: attempt.streakExtended,
+            },
+            nextId: attempt.nextPuzzleId,
+          }
+        : {}),
     };
     setOutcome(o);
 
@@ -689,7 +718,11 @@ export default function PuzzleScreen({
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
             <div>
               <div className="stat-caption">SG loss</div>
-              <div className="mono-nums text-[22px] font-semibold">{tick.sg.toFixed(2)}</div>
+              {/* Clamped: you cannot beat the optimal, so a small negative is
+                  Monte Carlo noise, not a better aim. */}
+              <div className="mono-nums text-[22px] font-semibold">
+                {Math.max(0, tick.sg).toFixed(2)}
+              </div>
             </div>
             <div>
               <div className="stat-caption">Your aim</div>
@@ -717,6 +750,21 @@ export default function PuzzleScreen({
               </div>
             </div>
           </div>
+          {outcome.progression && (
+            <p className="mono-nums mt-3 text-[13px] text-ink-soft">
+              +{outcome.progression.xpGained} XP
+              {outcome.progression.leveledUp && (
+                <span className="text-ink"> · level {outcome.progression.level} reached</span>
+              )}
+              {outcome.progression.streakExtended && (
+                <span className="text-ink">
+                  {' '}
+                  · {outcome.progression.streak}-day streak
+                </span>
+              )}
+            </p>
+          )}
+
           {phase === 'done' && (
             <div className="mt-4 flex flex-wrap gap-3">
               <button
@@ -726,14 +774,20 @@ export default function PuzzleScreen({
               >
                 Re-aim this shot
               </button>
-              {nextPuzzleId && (
+              {(outcome.nextId ?? nextPuzzleId) && (
                 <Link
-                  href={`/puzzle/${nextPuzzleId}`}
+                  href={`/puzzle/${outcome.nextId ?? nextPuzzleId}`}
                   className="grid min-h-11 place-items-center rounded-folio bg-ink px-5 font-ui text-[14px] text-paper"
                 >
                   Next puzzle →
                 </Link>
               )}
+              <Link
+                href="/summary"
+                className="grid min-h-11 place-items-center rounded-folio border border-hairline bg-paper px-5 font-ui text-[14px]"
+              >
+                Session summary
+              </Link>
             </div>
           )}
         </div>

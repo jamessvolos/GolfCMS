@@ -284,9 +284,12 @@ model HeatmapCache { id, puzzleId, profileBucket String, grid Json, optimalAim J
    pipeline shared with the seed. 10 holes / 26 puzzles across all four
    categories, committed as `data/holes/*.json` and checked by
    `npm run content:audit`.
-5. **Elo + progression.** Ratings, puzzle queue (serve puzzles near player
-   rating ±150), XP, levels, tally-mark streaks, category stats, folio
-   session-summary page with the ink sparkline.
+5. **Elo + progression.** ✅ Ratings persisted per attempt; `/play` queue
+   serves the nearest unseen puzzle within ±150 (widening when the band is
+   empty, review-by-recency when the library is exhausted); XP by band with
+   an upset bonus, levels every 500 XP, daily streaks drawn as inked tally
+   marks, per-category accuracy, and a folio `/summary` with the 1px ink
+   sparkline.
 6. **Explanation generator.** Rule-based sentences from `outcomeStats`
    deltas between player aim and optimal (hazard percentages,
    distance-to-pin tradeoffs), e.g. "Aiming at the pin puts 31% of your
