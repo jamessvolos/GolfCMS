@@ -23,7 +23,25 @@ Full product spec: [docs/spec.md](docs/spec.md)
   (Postgres-ready); the engine scores every aim with your bucketed profile;
   heatmap grids cached server-side per `(puzzleId, profileBucket)`;
   attempts and Elo persisted.
-- ⏳ Milestone 4 — annotation admin + 10 real holes.
+- ✅ **Milestone 4 — annotation studio + content.** `/admin/annotate`
+  traces holes over live satellite imagery into one validated ingest
+  pipeline; 10 real holes / 26 puzzles ship as committed
+  `data/holes/*.json` (Sawgrass 17 & 18, Pebble 8 & 18, Bay Hill 18,
+  Scottsdale 17, Harbour Town 18, Doral 18, the Road Hole, plus the
+  synthetic cape fixture).
+- ⏳ Milestone 5 — Elo queue, XP, streaks, session summary.
+
+## Content
+
+```bash
+npm run content:audit    # ring validity, lie classification, distances
+npm run content:export   # DB → data/holes/*.json (commit the result)
+```
+
+Holes are traced in the studio, saved through `/api/admin/hole`, then
+exported to `data/holes/` so a fresh clone seeds the whole library.
+`data/holes-draft/` holds annotated-but-untrusted holes; it is never
+seeded.
 
 ## Try it
 

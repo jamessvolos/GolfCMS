@@ -278,8 +278,12 @@ model HeatmapCache { id, puzzleId, profileBucket String, grid Json, optimalAim J
    shape); engine consumes the bucketed profile everywhere; heatmap grids
    cached server-side per (puzzleId, profileBucket); attempts + Elo
    persisted via Prisma/SQLite.
-4. **Annotation admin + content.** Build `/admin/annotate`, then use it to
-   create 10 holes / ~25 puzzles across all four categories.
+4. **Annotation admin + content.** ✅ `/admin/annotate` built (terra-draw
+   over Esri imagery, kind-tagged polygons, pin/tee/ball placement, up to
+   four puzzles per hole, load-and-edit), feeding one validated ingest
+   pipeline shared with the seed. 10 holes / 26 puzzles across all four
+   categories, committed as `data/holes/*.json` and checked by
+   `npm run content:audit`.
 5. **Elo + progression.** Ratings, puzzle queue (serve puzzles near player
    rating ±150), XP, levels, tally-mark streaks, category stats, folio
    session-summary page with the ink sparkline.
