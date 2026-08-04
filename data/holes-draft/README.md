@@ -44,13 +44,29 @@ answer awards PERFECT for no thought.
 For comparison, the shipped library's median trap is 0.05 and its best
 traced hole reaches 0.19.
 
-The reason is not the importer. It is that what makes a links hole hard —
-gorse, knee-deep rough, out of bounds, a specific bunker you must not be
-level with — is either unmapped in OSM (`golf=out_of_bounds` is almost
-never used) or invisible to an engine with one undifferentiated "rough".
 Three of eight imported holes did clear the bar and ship: `county-down-4`
 (trap 0.88, the best puzzle in the library by a distance), `birkdale-12`
 (0.44) and `carnoustie-17` (0.14).
 
-Two things would unbench these: a rough severity the engine can distinguish,
-or hand-added OB where the hole is actually defined by it.
+### Why — the leading hypothesis, not yet tested
+
+It is NOT that the engine cannot express severe ground. It has two penal
+tiers below fairway: `rough` (sigma ×1.25, 2.55 strokes at the short end)
+and `recovery` (×1.40, 3.40) — nearly a full stroke apart. All five benched
+holes except `carnoustie-18` carry recovery polygons, so the gorse is
+arriving.
+
+The likelier cause is the **80-yard import corridor**. Everything outside it
+is discarded, and unclassified ground is rough by definition — so a shot
+100 yards offline into actual gorse is scored as ordinary rough, a stroke
+cheaper than the ground it is really in. That flattens the penalty field
+exactly where a links hole's decision lives, and these holes have broad
+fairways (`county-down-9` imported eight fairway polygons, `carnoustie-18`
+eight) which flattens it further.
+
+Cheap test before doing anything else: re-import these five at a 150y
+corridor and see whether trap size recovers. If it does, the corridor
+constant is the bug and every future import improves with it. If it does
+not, the diagnosis moves to the engine's penalty model or to the missing
+out-of-bounds — `golf=out_of_bounds` exists in OSM and is almost never
+used.

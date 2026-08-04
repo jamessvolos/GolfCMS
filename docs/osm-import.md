@@ -125,11 +125,9 @@ is a hypothesis rather than a threshold.
 - **A clean import is not automatically a good puzzle.** Of eight holes
   imported from three championship links, five had a trap size of
   0.00–0.01 — geometrically correct, and with nothing to learn, because
-  aiming at the flag was already optimal. What makes those holes hard is
-  gorse, deep rough and out of bounds, which OSM largely does not map and
-  the engine's single undifferentiated "rough" could not express anyway.
-  The other three shipped, one of them the best puzzle in the library.
-  See `data/holes-draft/README.md`.
+  aiming at the flag was already optimal. The other three shipped, one of
+  them the best puzzle in the library. See `data/holes-draft/README.md`
+  for the current hypothesis about why, which is not yet settled.
 - **Import is not a substitute for looking.** Preview, read the notes, and
   play the hole once before trusting it. `--out` writes a draft to
   `data/holes-draft/` for review instead of committing.
