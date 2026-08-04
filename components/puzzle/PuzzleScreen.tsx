@@ -20,7 +20,7 @@ import { bucketedProfile, profileBucket } from '@/lib/engine/profile';
 import { scoreBand } from '@/lib/engine/scoring';
 import type { HoleData, LonLat, Pt } from '@/lib/engine/types';
 import { bandStamp, reveal as beats } from '@/lib/design/tokens';
-import { buildMapStyle } from '@/lib/map/groundStyle';
+import { attributionsFor, buildMapStyle } from '@/lib/map/groundStyle';
 import { drawRangeTicks, drawReveal } from '@/lib/map/overlayDraw';
 import type { EllipseSpec, RevealScene } from '@/lib/map/overlayDraw';
 import { EngineClient } from '@/lib/worker/engineClient';
@@ -249,7 +249,14 @@ export default function PuzzleScreen({
         dragRotate: false,
         attributionControl: false,
       });
-      map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
+      map.addControl(
+        new maplibregl.AttributionControl({
+          compact: true,
+          // ODbL credit for imported holes, beside Esri's imagery credit.
+          customAttribution: attributionsFor(hole),
+        }),
+        'bottom-left',
+      );
       map.touchZoomRotate.disableRotation();
       // Arrow keys belong to the aim pin (keyboard aiming), not map panning.
       map.keyboard.disable();

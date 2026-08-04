@@ -11,53 +11,9 @@ import { join } from 'node:path';
 import { kinks, polygon as turfPolygon } from '@turf/turf';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
 import { dist } from '@/lib/engine/projection';
-import { ingestSchema } from '@/lib/server/ingestHole';
-import type { IngestInput } from '@/lib/server/ingestHole';
-import type { HoleData } from '@/lib/engine/types';
+import { holeDataFromInput, ingestSchema } from '@/lib/server/ingestHole';
 
 const CONTENT_DIR = join(process.cwd(), 'data', 'holes');
-
-function toHoleData(input: IngestInput): HoleData {
-  const { hole } = input;
-  return {
-    id: hole.id,
-    courseName: hole.courseName,
-    holeNumber: hole.holeNumber,
-    par: hole.par,
-    yardage: hole.yardage ?? 0,
-    groundPlan: hole.groundPlan ?? false,
-    imageryCenter: hole.imageryCenter ?? {
-      lon: (hole.tees[0]!.lon + hole.pin.lon) / 2,
-      lat: (hole.tees[0]!.lat + hole.pin.lat) / 2,
-    },
-    geojson: {
-      type: 'FeatureCollection',
-      features: [
-        ...hole.polygons.map((p) => {
-          const ring = p.ring.map(([lon, lat]) => [lon, lat] as [number, number]);
-          const [fx, fy] = ring[0]!;
-          const [lx, ly] = ring[ring.length - 1]!;
-          if (fx !== lx || fy !== ly) ring.push([fx, fy]);
-          return {
-            type: 'Feature' as const,
-            properties: { kind: p.kind, ...(p.name ? { name: p.name } : {}) },
-            geometry: { type: 'Polygon' as const, coordinates: [ring] },
-          };
-        }),
-        {
-          type: 'Feature' as const,
-          properties: { kind: 'pin' as const },
-          geometry: { type: 'Point' as const, coordinates: [hole.pin.lon, hole.pin.lat] },
-        },
-        ...hole.tees.map((t) => ({
-          type: 'Feature' as const,
-          properties: { kind: 'tee' as const },
-          geometry: { type: 'Point' as const, coordinates: [t.lon, t.lat] as [number, number] },
-        })),
-      ],
-    },
-  };
-}
 
 let failures = 0;
 let warnings = 0;
@@ -77,8 +33,9 @@ for (const file of files) {
 
   // 1. Ring validity — including the studio's 9-decimal precision contract:
   // stored geometry beyond it is silently dropped when a hole is loaded.
-  const overPrecise = input.hole.polygons
-    .flatMap((p) => p.ring)
+  const allRings = input.hole.polygons.flatMap((p) => [p.ring, ...(p.holes ?? [])]);
+  const overPrecise = allRings
+    .flat()
     .filter(([lon, lat]) => Number(lon.toFixed(9)) !== lon || Number(lat.toFixed(9)) !== lat);
   if (overPrecise.length) {
     problems.push(
@@ -86,26 +43,36 @@ for (const file of files) {
     );
   }
   for (const [i, p] of input.hole.polygons.entries()) {
-    const ring = p.ring.map(([lon, lat]) => [lon, lat] as [number, number]);
-    const [fx, fy] = ring[0]!;
-    const [lx, ly] = ring[ring.length - 1]!;
-    if (fx !== lx || fy !== ly) ring.push([fx, fy]);
-    if (ring.length < 4) {
-      problems.push(`polygon ${i} (${p.kind}) has too few vertices`);
-      continue;
-    }
-    try {
-      const k = kinks(turfPolygon([ring]));
-      if (k.features.length > 0) {
-        problems.push(`polygon ${i} (${p.kind}) self-intersects ×${k.features.length}`);
+    // Islands are checked alongside the outer ring: an imported multipolygon
+    // can carry a malformed inner ring just as easily as a traced outer one.
+    const rings: [string, [number, number][]][] = [
+      [`polygon ${i} (${p.kind})`, p.ring],
+      ...(p.holes ?? []).map(
+        (h, j) => [`polygon ${i} (${p.kind}) island ${j + 1}`, h] as [string, [number, number][]],
+      ),
+    ];
+    for (const [label, raw] of rings) {
+      const ring = raw.map(([lon, lat]) => [lon, lat] as [number, number]);
+      const [fx, fy] = ring[0]!;
+      const [lx, ly] = ring[ring.length - 1]!;
+      if (fx !== lx || fy !== ly) ring.push([fx, fy]);
+      if (ring.length < 4) {
+        problems.push(`${label} has too few vertices`);
+        continue;
       }
-    } catch (err) {
-      problems.push(`polygon ${i} (${p.kind}) invalid: ${(err as Error).message}`);
+      try {
+        const k = kinks(turfPolygon([ring]));
+        if (k.features.length > 0) {
+          problems.push(`${label} self-intersects ×${k.features.length}`);
+        }
+      } catch (err) {
+        problems.push(`${label} invalid: ${(err as Error).message}`);
+      }
     }
   }
 
   // 2. Engine classification.
-  const holeData = toHoleData(input);
+  const holeData = holeDataFromInput(input.hole);
   const prepared = prepareHole(holeData);
   const pinLie = classifyPoint(prepared, prepared.pin);
   if (pinLie !== 'green') problems.push(`pin classifies as ${pinLie}`);

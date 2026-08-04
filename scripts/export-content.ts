@@ -50,6 +50,17 @@ async function main() {
           ring: f.geometry.coordinates[0]!.map(
             ([lon, lat]) => [round(lon), round(lat)] as [number, number],
           ),
+          // Rings past the first are islands. Dropping them here would mean
+          // an imported multipolygon loses its island on the round trip
+          // through data/holes — and the exported hole would classify
+          // differently from the one that was ingested.
+          ...(f.geometry.coordinates.length > 1
+            ? {
+                holes: f.geometry.coordinates
+                  .slice(1)
+                  .map((r) => r.map(([lon, lat]) => [round(lon), round(lat)] as [number, number])),
+              }
+            : {}),
         });
       } else if (f.properties.kind === 'pin') {
         pin = roundLonLat({ lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] });

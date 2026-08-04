@@ -38,12 +38,21 @@ export const ingestSchema = z.object({
     imageryCenter: lonLat.optional(),
     /** Synthetic holes paint their polygons; traced holes let imagery show. */
     groundPlan: z.boolean().optional(),
+    /** "osm" carries an ODbL attribution obligation the map then honours. */
+    source: z.enum(['traced', 'osm']).optional(),
     polygons: z
       .array(
         z.object({
           kind: z.enum(['fairway', 'green', 'bunker', 'water', 'ob', 'recovery']),
           name: z.string().max(40).optional(),
           ring,
+          /**
+           * Inner rings (islands). The engine has always honoured them —
+           * classification runs point-in-polygon over every ring — but the
+           * ingest path could not express one, so an OSM multipolygon with
+           * an island had to lose it silently. Traced holes never set this.
+           */
+          holes: z.array(ring).max(12).optional(),
         }),
       )
       .min(1),
@@ -87,18 +96,26 @@ export interface IngestResult {
 const COORD_DP = 9;
 const round = (v: number) => Number(v.toFixed(COORD_DP));
 
+/** Round to the storage precision and close the ring if it is open. */
+function closedRing(ring: [number, number][]): [number, number][] {
+  const coords = ring.map(([lon, lat]) => [round(lon), round(lat)] as [number, number]);
+  const [fx, fy] = coords[0]!;
+  const [lx, ly] = coords[coords.length - 1]!;
+  if (fx !== lx || fy !== ly) coords.push([fx, fy]);
+  return coords;
+}
+
 function buildGeojson(hole: IngestInput['hole']): HoleGeoJSON {
-  const polygonFeatures: HolePolygonFeature[] = hole.polygons.map((p) => {
-    const coords = p.ring.map(([lon, lat]) => [round(lon), round(lat)] as [number, number]);
-    const [fx, fy] = coords[0]!;
-    const [lx, ly] = coords[coords.length - 1]!;
-    if (fx !== lx || fy !== ly) coords.push([fx, fy]);
-    return {
-      type: 'Feature',
-      properties: { kind: p.kind, ...(p.name ? { name: p.name } : {}) },
-      geometry: { type: 'Polygon', coordinates: [coords] },
-    };
-  });
+  const polygonFeatures: HolePolygonFeature[] = hole.polygons.map((p) => ({
+    type: 'Feature',
+    properties: { kind: p.kind, ...(p.name ? { name: p.name } : {}) },
+    geometry: {
+      type: 'Polygon',
+      // Outer ring first, then islands — the order the engine's
+      // point-in-polygon test expects.
+      coordinates: [closedRing(p.ring), ...(p.holes ?? []).map(closedRing)],
+    },
+  }));
   const pointFeatures: HolePointFeature[] = [
     {
       type: 'Feature',
@@ -125,13 +142,20 @@ function buildGeojson(hole: IngestInput['hole']): HoleGeoJSON {
  */
 function swallowedWarnings(hole: IngestInput['hole']): string[] {
   const out: string[] = [];
-  const closed = hole.polygons.map((p) => {
-    const ring = p.ring.map(([lon, lat]) => [lon, lat] as [number, number]);
+  const close = (r: [number, number][]) => {
+    const ring = r.map(([lon, lat]) => [lon, lat] as [number, number]);
     const [fx, fy] = ring[0]!;
     const [lx, ly] = ring[ring.length - 1]!;
     if (fx !== lx || fy !== ly) ring.push([fx, fy]);
-    return { kind: p.kind, name: p.name, feature: turfPolygon([ring]) };
-  });
+    return ring;
+  };
+  const closed = hole.polygons.map((p) => ({
+    kind: p.kind,
+    name: p.name,
+    // Islands are excluded from the polygon's own area, so a green with a
+    // pond in it is not reported as "covered" by that pond.
+    feature: turfPolygon([close(p.ring), ...(p.holes ?? []).map(close)]),
+  }));
   const rank = (k: string) => CLASSIFY_PRIORITY.indexOf(k as never);
 
   for (const [i, mine] of closed.entries()) {
@@ -166,24 +190,39 @@ function swallowedWarnings(hole: IngestInput['hole']): string[] {
   return out;
 }
 
-export async function ingestHole(input: IngestInput): Promise<IngestResult> {
-  const { hole, puzzles } = input;
-  const warnings: string[] = [...swallowedWarnings(hole)];
-
-  const imageryCenter = hole.imageryCenter ?? {
-    lon: (hole.tees[0]!.lon + hole.pin.lon) / 2,
-    lat: (hole.tees[0]!.lat + hole.pin.lat) / 2,
-  };
-  const holeData: HoleData = {
+/**
+ * The authored hole → the engine's HoleData, with the same defaults the
+ * ingest path applies. Exported because the audit script, the golden
+ * corpus, and the OSM importer all need to prepare a hole from an
+ * un-ingested payload, and three copies of these defaults would drift.
+ *
+ * `yardage` is left at the caller's value (0 when omitted); ingestHole
+ * measures it from the projected tee→pin distance once the projection
+ * exists.
+ */
+export function holeDataFromInput(hole: IngestInput['hole']): HoleData {
+  return {
     id: hole.id,
     courseName: hole.courseName,
     holeNumber: hole.holeNumber,
     par: hole.par,
     yardage: hole.yardage ?? 0,
     geojson: buildGeojson(hole),
-    imageryCenter,
+    imageryCenter: hole.imageryCenter ?? {
+      lon: (hole.tees[0]!.lon + hole.pin.lon) / 2,
+      lat: (hole.tees[0]!.lat + hole.pin.lat) / 2,
+    },
     groundPlan: hole.groundPlan ?? false,
+    source: hole.source ?? 'traced',
   };
+}
+
+export async function ingestHole(input: IngestInput): Promise<IngestResult> {
+  const { hole, puzzles } = input;
+  const warnings: string[] = [...swallowedWarnings(hole)];
+
+  const holeData = holeDataFromInput(hole);
+  const imageryCenter = holeData.imageryCenter;
   const prepared = prepareHole(holeData);
   const teeLocal = prepared.toLocal(hole.tees[0]!);
   const yardage = hole.yardage ?? Math.round(dist(teeLocal, prepared.pin));
@@ -220,6 +259,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       geojson: JSON.stringify(holeData.geojson),
       imageryCenter: JSON.stringify(imageryCenter),
       groundPlan: holeData.groundPlan,
+      source: holeData.source,
     },
     update: {
       courseName: hole.courseName,
@@ -229,6 +269,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       geojson: JSON.stringify(holeData.geojson),
       imageryCenter: JSON.stringify(imageryCenter),
       groundPlan: holeData.groundPlan,
+      source: holeData.source,
     },
   });
 

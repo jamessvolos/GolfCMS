@@ -45,12 +45,21 @@ Full product spec: [docs/spec.md](docs/spec.md)
 ```bash
 npm run content:audit    # ring validity, lie classification, distances
 npm run content:export   # DB → data/holes/*.json (commit the result)
+npm run content:import -- --course "Royal Birkdale" --hole 12   # from OSM
 ```
 
 Holes are traced in the studio, saved through `/api/admin/hole`, then
 exported to `data/holes/` so a fresh clone seeds the whole library.
 `data/holes-draft/` holds annotated-but-untrusted holes; it is never
 seeded.
+
+Where a course is already mapped in OpenStreetMap, `/admin/import` (or
+`content:import`) pulls the hole instead: features come from OSM tagging and
+the engine plays the hole to place each puzzle's ball. It previews first and
+lists every decision it made — reversed centrelines, inferred par, dropped
+features — before anything is written, and goes through the same
+`ingestHole` gates a traced hole does. Limits, tag mapping and the ODbL
+credit: [docs/osm-import.md](docs/osm-import.md).
 
 ## Try it
 

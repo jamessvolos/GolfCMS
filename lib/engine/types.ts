@@ -110,6 +110,12 @@ export interface HoleData {
    * annotations stay invisible. The engine ignores this — it's a render hint.
    */
   groundPlan?: boolean;
+  /**
+   * Provenance of the geometry. "osm" means it was imported from
+   * OpenStreetMap, whose ODbL licence requires the credit that
+   * buildMapStyle then attaches. The engine ignores this.
+   */
+  source?: 'traced' | 'osm';
 }
 
 export interface PuzzleData {

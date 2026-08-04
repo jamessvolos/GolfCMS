@@ -15,6 +15,22 @@ export const ESRI_ATTRIBUTION =
   'Imagery © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community';
 
 /**
+ * Required by ODbL for any hole whose geometry came out of OpenStreetMap.
+ *
+ * This has to go on the AttributionControl as customAttribution, NOT on the
+ * hole source: MapLibre only surfaces a source's attribution while some
+ * visible layer uses that source, and a hole traced over imagery renders no
+ * ground-plan fills at all. Attaching it to the source looked right in
+ * `map.getStyle()` and displayed nothing.
+ */
+export const OSM_ATTRIBUTION = 'Hole data © OpenStreetMap contributors (ODbL)';
+
+/** The credits a hole owes, given where its geometry came from. */
+export function attributionsFor(hole: Pick<HoleData, 'source'>): string[] {
+  return hole.source === 'osm' ? [OSM_ATTRIBUTION] : [];
+}
+
+/**
  * Sandboxed dev containers can't reach Esri from the browser; setting
  * NEXT_PUBLIC_TILE_PROXY=1 at build time routes tiles through the
  * same-origin relay at /api/tiles (see app/api/tiles/.../route.ts).

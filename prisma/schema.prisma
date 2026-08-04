@@ -40,6 +40,9 @@ model Hole {
   /// Paint the vector ground plan over imagery (synthetic holes only;
   /// holes traced over real imagery render imagery + overlays alone).
   groundPlan    Boolean  @default(false)
+  /// Where the geometry came from. "osm" carries an ODbL attribution
+  /// obligation, so the map credits OpenStreetMap for those holes.
+  source        String   @default("traced")
   puzzles       Puzzle[]
 }
 

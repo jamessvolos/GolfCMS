@@ -19,7 +19,11 @@ export default function AnnotatePage() {
         <p className="mt-1 max-w-[75ch] text-[13.5px] text-ink-soft">
           Trace the features over imagery — fairway, green, bunkers, water, trees, O.B. — place
           the pin and tees, define up to four puzzles, and save. Ratings and heatmaps are
-          computed on save. Anything untraced plays as rough.
+          computed on save. Anything untraced plays as rough.{' '}
+          <Link href="/admin/import" className="underline">
+            Import from OpenStreetMap
+          </Link>{' '}
+          where the course is already mapped.
         </p>
         <hr className="rule-engraved mt-3" />
       </header>

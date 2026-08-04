@@ -97,6 +97,7 @@ function parseHoleRow(row: {
   geojson: string;
   imageryCenter: string;
   groundPlan: boolean;
+  source?: string;
 }): HoleData {
   return {
     id: row.id,
@@ -107,6 +108,7 @@ function parseHoleRow(row: {
     geojson: JSON.parse(row.geojson),
     imageryCenter: lonLat.parse(JSON.parse(row.imageryCenter)),
     groundPlan: row.groundPlan,
+    source: row.source === 'osm' ? 'osm' : 'traced',
   };
 }
 
