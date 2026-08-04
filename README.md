@@ -33,7 +33,12 @@ Full product spec: [docs/spec.md](docs/spec.md)
   (±150, widening as needed); XP by band with an upset bonus, levels every
   500 XP, inked tally-mark streaks, per-category accuracy, and a `/summary`
   folio card with the 1px ink rating sparkline.
-- ⏳ Milestone 6 — explanation generator.
+- ✅ **Milestone 6 — the caddie's note.** A rule-based explanation
+  generator ([`lib/explain/`](lib/explain/)) turns the reveal into two
+  beats — THE READ, then THE MOVE — with every sentence entailed by a
+  number the engine computed. No runtime model: the note is generated in
+  the worker inside the 900ms reveal budget.
+  [A simulated year of its roadmap](docs/roadmap-year-one.md).
 
 ## Content
 
@@ -51,16 +56,32 @@ seeded.
 
 ```bash
 npm install
-npm run db:push && npm run db:seed   # create + seed the SQLite dev DB
-npm run dev                          # then open http://localhost:3000
+npm run db:migrate && npm run db:seed   # create + seed the SQLite dev DB
+npm run dev                             # then open http://localhost:3000
 
 npm test        # engine + cache unit tests
 npm run demo    # ASCII expected-strokes contours for a 5- vs 20-handicap
 ```
 
+If your dev database predates migrations (created with `db:push`), baseline
+it once with `npx prisma migrate resolve --applied 0_init`.
+
 In a sandboxed container whose browser can't reach Esri directly, build
 with `NEXT_PUBLIC_TILE_PROXY=1` to route imagery through the same-origin
 relay.
+
+## Deploying
+
+```bash
+docker build -t sg-trainer .
+docker run -p 3000:3000 -v sg-data:/data sg-trainer
+```
+
+One container, one SQLite file on a volume; first boot migrates and seeds
+itself. Full notes — environment, the Postgres path, why Vercel doesn't
+work — in [docs/deploy.md](docs/deploy.md). CI runs typecheck, migration
+drift, tests, the content audit, the production build, and a Docker
+build-and-boot on every push.
 
 ## Layout
 

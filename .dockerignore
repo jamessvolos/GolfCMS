@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.github
+lib/generated
+public/vendor
+prisma/dev.db
+prisma/dev.db-journal
+prisma/dev.db-shm
+prisma/dev.db-wal
+.docker-data
+*.log
+.env
+.env.local

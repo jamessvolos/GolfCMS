@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # postinstall runs `prisma generate`, which writes lib/generated/prisma.
+      # Nothing here needs a database: every DB-touching page is
+      # force-dynamic, so the build never opens a connection.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # A container boots by running `prisma migrate deploy`, so a schema
+      # change that never became a migration ships a server whose queries
+      # reference columns the database does not have. Exits 2 on any drift.
+      - name: Migrations match the schema
+        run: npm run db:drift
+
+      - name: Unit tests
+        run: npm test
+
+      # Content is code here — a bad ring or a pin off the green is a build
+      # break, not a runtime surprise. Exits non-zero on any problem.
+      - name: Audit hole content
+        run: npm run content:audit
+
+      # `prebuild` copies the MapLibre worker into public/vendor; `next start`
+      # only serves public files that existed at build time, so this must run
+      # in the same job that builds.
+      - name: Production build
+        run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build-only: proves the runtime image still assembles. Publishing is a
+      # deploy concern and deliberately not wired here.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: sg-trainer:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image is useless if it can't answer. Boot it against an empty
+      # volume — that exercises the whole entrypoint: migrate, seed, serve.
+      # Locally that sequence is ~20s (14s of it seeding warm grids for 26
+      # puzzles), so the budget here is generous rather than tight.
+      - name: Smoke-test the image
+        run: |
+          mkdir -p "$PWD/.docker-data"
+          docker run -d --name sg -p 3000:3000 \
+            -e DATABASE_URL="file:/data/sg.db" \
+            -v "$PWD/.docker-data:/data" \
+            sg-trainer:ci
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:3000/ | grep -q "SG Trainer"; then
+              echo "served the hole listing after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container never served the listing on :3000"
+          exit 1
+
+      - name: Container logs
+        if: always()
+        run: docker logs sg 2>&1 | tail -50 || true
