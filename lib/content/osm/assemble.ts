@@ -12,14 +12,21 @@ import {
   booleanPointInPolygon,
   buffer,
   distance as turfDistance,
+  intersect,
   lineString,
   pointOnFeature,
   polygon as turfPolygon,
 } from '@turf/turf';
-import type { Feature, Polygon } from 'geojson';
+import type { Feature, MultiPolygon, Polygon } from 'geojson';
 import type { IngestInput } from '@/lib/server/ingestHole';
 import type { FeatureKind } from '@/lib/engine/types';
-import { kindForTags, parFromYards, parseDistanceTag, parseParTag } from './tags';
+import {
+  kindForTags,
+  parFromYards,
+  parseDistanceTag,
+  parseParTag,
+  waterwayHalfWidthYds,
+} from './tags';
 import type { OsmElement, OsmNode, OsmRelation, OsmWay, OverpassResponse } from './overpass';
 
 export interface LonLat {
@@ -133,9 +140,43 @@ interface CandidateFeature {
   source: string;
 }
 
+const isClosed = (pts: { lat: number; lon: number }[]) =>
+  pts.length > 3 &&
+  pts[0]!.lat === pts[pts.length - 1]!.lat &&
+  pts[0]!.lon === pts[pts.length - 1]!.lon;
+
+/**
+ * A way's outer ring, or null when the way is not an area.
+ *
+ * Open ways are NOT force-closed. Joining the ends of a 217-point river
+ * centreline produces a self-intersecting sliver that classifies as almost
+ * nothing — a silent way to lose a hazard. Linear features are handled by
+ * bufferedWaterway instead, and anything else open is skipped.
+ */
 function wayRing(way: OsmWay): [number, number][] | null {
-  if (!way.geometry || way.geometry.length < 3) return null;
+  if (!way.geometry || way.geometry.length < 4) return null;
+  if (!isClosed(way.geometry)) return null;
   return close(way.geometry.map((g) => [g.lon, g.lat] as [number, number]));
+}
+
+/** A waterway centreline widened into the strip of water it actually is. */
+function bufferedWaterway(way: OsmWay): [number, number][] | null {
+  const half = waterwayHalfWidthYds(way.tags ?? {});
+  if (half === null || !way.geometry || way.geometry.length < 2) return null;
+  const buffered = buffer(lineString(way.geometry.map((g) => [g.lon, g.lat])), half, {
+    units: 'yards',
+  });
+  if (!buffered) return null;
+  const geom = buffered.geometry;
+  const ring =
+    geom.type === 'Polygon'
+      ? geom.coordinates[0]
+      : // A branching or self-crossing waterway buffers to a MultiPolygon;
+        // take the largest part rather than dropping the hazard entirely.
+        [...geom.coordinates].sort(
+          (a, b) => ringAreaSqYds(b[0] as [number, number][]) - ringAreaSqYds(a[0] as [number, number][]),
+        )[0]?.[0];
+  return ring ? close(ring as [number, number][]) : null;
 }
 
 function relationRings(rel: OsmRelation): { outer: [number, number][][]; inner: [number, number][][] } {
@@ -153,6 +194,45 @@ function relationRings(rel: OsmRelation): { outer: [number, number][][]; inner: 
 
 function toPolygon(f: CandidateFeature): Feature<Polygon> {
   return turfPolygon([f.outer, ...f.holes]);
+}
+
+/**
+ * Trim a feature to the hole's corridor, splitting it if the corridor cuts
+ * it into separate pieces.
+ *
+ * Selection alone is not enough. The Barry Burn is one `waterway=river` a
+ * kilometre and a half long; it intersects Carnoustie's 18th corridor, so
+ * it was kept — all 734 vertices of it, spanning 53 to 1183 yards from the
+ * pin. That polygon's bounding box covers the whole map, which defeats the
+ * engine's bbox pre-check and puts a 734-vertex point-in-polygon test in
+ * the Monte Carlo hot loop for every sample. Clipping bounds every feature
+ * to the hole it belongs to.
+ */
+function clipToCorridor(
+  c: CandidateFeature,
+  corridor: Feature<Polygon | MultiPolygon>,
+): CandidateFeature[] {
+  let clipped;
+  try {
+    clipped = intersect({ type: 'FeatureCollection', features: [toPolygon(c), corridor] });
+  } catch {
+    // Degenerate geometry: keep the feature whole rather than lose a hazard.
+    return [c];
+  }
+  if (!clipped) return [];
+
+  const parts: [number, number][][][] =
+    clipped.geometry.type === 'Polygon'
+      ? [clipped.geometry.coordinates as [number, number][][]]
+      : (clipped.geometry.coordinates as [number, number][][][]);
+
+  return parts
+    .map((rings) => ({
+      ...c,
+      outer: close(rings[0]!),
+      holes: rings.slice(1).map(close),
+    }))
+    .filter((p) => ringAreaSqYds(p.outer) >= MIN_FEATURE_AREA_SQ_YDS);
 }
 
 /**
@@ -237,7 +317,7 @@ export function assembleHole(
     let outer: [number, number][] | null = null;
     let holes: [number, number][][] = [];
     if (el.type === 'way') {
-      outer = wayRing(el);
+      outer = wayRing(el) ?? bufferedWaterway(el);
     } else {
       const rings = relationRings(el);
       // A multipolygon with several outers becomes several features; only
@@ -396,7 +476,7 @@ export function assembleHole(
       foreignGreens++;
       continue;
     }
-    kept.push(c);
+    kept.push(...clipToCorridor(c, corridor));
   }
   if (dropped) notes.push(`${dropped} mapped feature(s) fell outside the ${corridorYds}y corridor`);
   if (foreignGreens) {

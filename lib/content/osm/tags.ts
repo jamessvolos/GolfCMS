@@ -31,7 +31,9 @@ const RULES: { kind: FeatureKind; key: string; values: string[] }[] = [
   // Generic landcover, used when the golf schema is silent.
   { kind: 'water', key: 'natural', values: ['water'] },
   { kind: 'water', key: 'landuse', values: ['reservoir', 'basin'] },
-  { kind: 'water', key: 'waterway', values: ['riverbank', 'dock'] },
+  // Areas (riverbank, dock) and centrelines alike — a centreline is widened
+  // into its strip by waterwayHalfWidthYds before it becomes a polygon.
+  { kind: 'water', key: 'waterway', values: ['riverbank', 'dock', 'river', 'stream', 'ditch', 'drain', 'canal'] },
   { kind: 'recovery', key: 'natural', values: ['wood', 'scrub', 'heath', 'wetland'] },
   { kind: 'recovery', key: 'landuse', values: ['forest'] },
 ];
@@ -48,6 +50,10 @@ const EXCLUDE: { key: string; values?: string[] }[] = [
   { key: 'barrier' },
   { key: 'golf', values: ['cartpath', 'path', 'driving_range', 'practice', 'clubhouse'] },
   { key: 'leisure', values: ['pitch', 'swimming_pool'] },
+  // A burn in a culvert runs under the hole, not across it. The Barry Burn
+  // at Carnoustie is mapped in three pieces, one of them culverted.
+  { key: 'tunnel' },
+  { key: 'covered', values: ['yes'] },
 ];
 
 export function isExcluded(tags: OsmTags): boolean {
@@ -76,7 +82,40 @@ export const FEATURE_FILTER = [
   '["golf"]',
   '["natural"~"^(water|wood|scrub|heath|wetland)$"]',
   '["landuse"~"^(reservoir|basin|forest)$"]',
+  '["waterway"~"^(river|stream|ditch|drain|canal)$"]',
 ] as const;
+
+/**
+ * Half-widths in yards for a waterway mapped as a centreline rather than an
+ * area — which is how most of them are mapped.
+ *
+ * This matters more than it looks. Carnoustie's 18th is defined by the Barry
+ * Burn crossing in front of the green, and the burn is `waterway=river` on a
+ * LINE. Without this the hole imported with no water on it at all: every
+ * sentence the engine generated about that hole would have been true of a
+ * hole that does not exist.
+ */
+const WATERWAY_HALF_WIDTH_YDS: Record<string, number> = {
+  river: 4,
+  canal: 4,
+  stream: 1.5,
+  ditch: 1,
+  drain: 1,
+};
+
+/**
+ * Half-width to buffer a waterway centreline by, or null if this is not a
+ * linear waterway. Prefers the mapped `width` (metres, per the OSM wiki).
+ */
+export function waterwayHalfWidthYds(tags: OsmTags): number | null {
+  const kind = tags.waterway;
+  if (!kind || !(kind in WATERWAY_HALF_WIDTH_YDS)) return null;
+  const mapped = Number(tags.width);
+  if (Number.isFinite(mapped) && mapped > 0 && mapped < 200) {
+    return (mapped * 1.09361) / 2;
+  }
+  return WATERWAY_HALF_WIDTH_YDS[kind]!;
+}
 
 /**
  * OSM records hole length in `dist`, which the wiki defines as metres but

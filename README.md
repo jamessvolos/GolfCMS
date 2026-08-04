@@ -25,10 +25,11 @@ Full product spec: [docs/spec.md](docs/spec.md)
   attempts and Elo persisted.
 - ✅ **Milestone 4 — annotation studio + content.** `/admin/annotate`
   traces holes over live satellite imagery into one validated ingest
-  pipeline; 10 real holes / 26 puzzles ship as committed
-  `data/holes/*.json` (Sawgrass 17 & 18, Pebble 8 & 18, Bay Hill 18,
-  Scottsdale 17, Harbour Town 18, Doral 18, the Road Hole, plus the
-  synthetic cape fixture).
+  pipeline; 13 holes / 30 puzzles ship as committed `data/holes/*.json`
+  (Sawgrass 17 & 18, Pebble 8 & 18, Bay Hill 18, Scottsdale 17, Harbour
+  Town 18, Doral 18, the Road Hole and the synthetic cape fixture, plus
+  Royal County Down 4, Royal Birkdale 12 and Carnoustie 17 imported from
+  OpenStreetMap).
 - ✅ **Milestone 5 — progression.** `/play` serves puzzles near your rating
   (±150, widening as needed); XP by band with an upset bonus, levels every
   500 XP, inked tally-mark streaks, per-category accuracy, and a `/summary`

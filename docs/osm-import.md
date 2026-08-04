@@ -20,15 +20,23 @@ say so.
    point), asking for every golf feature plus the `golf=hole` centrelines
    and `golf=pin` nodes. `out geom` inlines coordinates, so assembly needs
    no second round trip.
-2. **Locate the hole.** Match `golf=hole` by its `ref` tag, falling back to
-   a number inside `name`, or to the centreline nearest a given point.
+2. **Locate the hole — or refuse.** Match `golf=hole` by its `ref` tag,
+   falling back to a number inside `name`. If more than one way matches,
+   the importer refuses and lists the candidates rather than picking. A
+   name search spans the planet and multi-course venues reuse hole
+   numbers: "Carnoustie hole 12" returns four ways, one of them in British
+   Columbia. Pass a point (`--near`) to choose between them.
 3. **Orient it.** OSM convention is tee→green but nothing enforces it, and a
    reversed way silently produces a hole played backwards. The importer
    measures which end is nearer a green and reverses when needed.
 4. **Assemble.** Ways become rings; multipolygon relations get their
-   fragments stitched into closed rings and keep their islands. Everything
-   is clipped to a corridor around the centreline, so the next hole's
-   bunkers don't come along.
+   fragments stitched into closed rings and keep their islands; waterway
+   centrelines are widened into the strip of water they are. Everything is
+   then *clipped* to a corridor around the centreline — not merely selected
+   by it. The Barry Burn is a single kilometre-and-a-half `waterway=river`,
+   and keeping it whole gave Carnoustie's 18th a 734-vertex polygon whose
+   bounding box covered the map, defeating the engine's bbox pre-check on
+   every Monte Carlo sample.
 5. **Place the pin and tee.** A `golf=pin` node inside the green if there is
    one; otherwise a point guaranteed to be *inside* the green — not the
    centroid, which on a horseshoe green sits on the collar and would fail
@@ -71,7 +79,9 @@ pond on a course is commonly both `golf=water_hazard` and `natural=water`.
 | `golf=water_hazard`, `golf=lateral_water_hazard` | water |
 | `golf=out_of_bounds` | ob |
 | `golf=fairway` | fairway |
-| `natural=water`, `landuse=reservoir\|basin`, `waterway=riverbank\|dock` | water |
+| `natural=water`, `landuse=reservoir\|basin` | water |
+| `waterway=riverbank\|dock` (areas) | water |
+| `waterway=river\|stream\|ditch\|drain\|canal` (centrelines, buffered) | water |
 | `natural=wood\|scrub\|heath\|wetland`, `landuse=forest` | recovery |
 
 `golf=rough` and `golf=tee` map to nothing on purpose: rough is what the
@@ -79,7 +89,14 @@ engine assumes for unmapped ground, and a tee box is a start position rather
 than a lie. Anything tagged `building`, `amenity`, `highway`, `barrier`,
 `leisure=pitch|swimming_pool`, or as a cart path / driving range / practice
 area is rejected outright — that rule is why a mapped rooftop pond does not
-become a water hazard.
+become a water hazard. So is anything in a `tunnel` or `covered`: a burn in
+a culvert runs under the hole, not across it, and the Barry Burn is mapped
+in three pieces with one of them culverted.
+
+Only the hole's own green is kept. A links routing puts the neighbours'
+greens well inside the corridor — Carnoustie's 12th came back with seven —
+and a foreign green is not a feature of this hole, it is a putting surface
+the engine would treat as the target. They classify as rough.
 
 ### The `dist` tag is not trusted
 
@@ -105,6 +122,14 @@ is a hypothesis rather than a threshold.
   the mapper drew.
 - **One tee.** The importer takes the tee box nearest the centreline's tee
   end. Multiple tee boxes are not modelled.
+- **A clean import is not automatically a good puzzle.** Of eight holes
+  imported from three championship links, five had a trap size of
+  0.00–0.01 — geometrically correct, and with nothing to learn, because
+  aiming at the flag was already optimal. What makes those holes hard is
+  gorse, deep rough and out of bounds, which OSM largely does not map and
+  the engine's single undifferentiated "rough" could not express anyway.
+  The other three shipped, one of them the best puzzle in the library.
+  See `data/holes-draft/README.md`.
 - **Import is not a substitute for looking.** Preview, read the notes, and
   play the hole once before trusting it. `--out` writes a draft to
   `data/holes-draft/` for review instead of committing.
@@ -117,9 +142,8 @@ Overpass is rate-limited and the public instance is often busy. Set
 requests to a local or private-range endpoint deliberately bypass any egress
 proxy.
 
-Where Overpass is unreachable — this project's own dev container blocks
-every OSM endpoint at the network policy — run the query elsewhere and
-import the saved payload:
+Where Overpass is unreachable, run the query elsewhere and import the saved
+payload:
 
 ```bash
 npm run content:import -- --course "Royal Birkdale" --hole 12 --query   # prints Overpass QL

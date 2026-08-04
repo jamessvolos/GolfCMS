@@ -82,6 +82,11 @@ async function main() {
         yardage: hole.yardage,
         imageryCenter: roundLonLat(JSON.parse(hole.imageryCenter)),
         groundPlan: hole.groundPlan,
+        // Provenance has to survive the round trip. data/holes is what a
+        // fresh clone seeds from, so dropping it here would reseed an
+        // imported hole as "traced" and silently retire the ODbL credit it
+        // is published under.
+        ...(hole.source === 'osm' ? { source: 'osm' as const } : {}),
         polygons,
         pin,
         tees,

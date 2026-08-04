@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { assembleHole, findHoleWay } from './assemble';
 import { MESSY_COURSE, loadHole, overpassFromHole } from './fixtures';
 import { derivePuzzles } from './puzzles';
-import { kindForTags, parFromYards, parseDistanceTag, parseParTag } from './tags';
+import {
+  kindForTags,
+  parFromYards,
+  parseDistanceTag,
+  parseParTag,
+  waterwayHalfWidthYds,
+} from './tags';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
 import { dist } from '@/lib/engine/projection';
 import { holeDataFromInput, ingestSchema } from '@/lib/server/ingestHole';
@@ -32,6 +38,24 @@ describe('tag rules', () => {
     expect(parseDistanceTag('366 m')!.yards).toBeCloseTo(400.3, 0);
     expect(parseDistanceTag('366')).toEqual({ yards: 366, unit: 'unknown' });
     expect(parseDistanceTag('about a par 4')).toBeNull();
+  });
+
+  it('treats a waterway centreline as water, and sizes it', () => {
+    // The Barry Burn at Carnoustie is `waterway=river` on a LINE. Before
+    // this the 18th imported with no water at all — every sentence the
+    // engine generated was true of a hole that does not exist.
+    expect(kindForTags({ waterway: 'river', name: 'Barry Burn' })).toBe('water');
+    expect(waterwayHalfWidthYds({ waterway: 'river' })).toBe(4);
+    expect(waterwayHalfWidthYds({ waterway: 'ditch' })).toBe(1);
+    // A mapped width is in metres and wins over the default.
+    expect(waterwayHalfWidthYds({ waterway: 'stream', width: '6' })).toBeCloseTo(3.28, 2);
+    expect(waterwayHalfWidthYds({ waterway: 'stream', width: 'wide' })).toBe(1.5);
+    expect(waterwayHalfWidthYds({ natural: 'water' })).toBeNull();
+  });
+
+  it('ignores a culverted burn, which runs under the hole', () => {
+    expect(kindForTags({ waterway: 'river', tunnel: 'culvert' })).toBeNull();
+    expect(kindForTags({ waterway: 'stream', covered: 'yes' })).toBeNull();
   });
 
   it('only accepts a plausible par', () => {
