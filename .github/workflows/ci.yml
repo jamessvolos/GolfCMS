@@ -89,6 +89,32 @@ jobs:
           echo "::error::container never served the listing on :3000"
           exit 1
 
+      # Restarting must not re-ingest content that has not changed. Boot
+      # seeds from data/holes, and recomputing a Monte Carlo grid per puzzle
+      # costs ~27s for the shipped library — which would be 27s of downtime
+      # on every redeploy and would make scale-to-zero hosting unusable. The
+      # seed skips holes already present with warm grids; this proves it.
+      - name: Restart is fast
+        run: |
+          docker restart sg >/dev/null
+          start=$(date +%s)
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/ | grep -q "SG Trainer"; then
+              took=$(( $(date +%s) - start ))
+              echo "warm restart served in ${took}s"
+              if [ "$took" -gt 20 ]; then
+                echo "::error::warm restart took ${took}s — the seed is re-ingesting unchanged content"
+                docker logs sg 2>&1 | tail -30
+                exit 1
+              fi
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container did not come back after restart"
+          docker logs sg 2>&1 | tail -30
+          exit 1
+
       - name: Container logs
         if: always()
         run: docker logs sg 2>&1 | tail -50 || true

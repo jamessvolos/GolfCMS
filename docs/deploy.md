@@ -16,6 +16,7 @@ browser fetches directly from Esri.
 | `npm run content:audit` | Content is code. A self-intersecting ring or a pin off the green fails the build, not a player's session. |
 | `npm run build` | Also proves `prebuild` put the MapLibre worker in `public/vendor` — `next start` only serves public files that existed at build time. |
 | Docker build + boot | The image is built and run against an empty volume, which exercises the entrypoint end to end: migrate, seed, serve the hole listing. |
+| Warm restart under 20s | The container is restarted and must serve again quickly. Re-ingesting unchanged content costs ~20s and shows up only as slow deploys — a silent failure worth a gate. |
 
 The Docker job is the only place the image is verified. It cannot be built in
 the Anthropic dev container — Docker Hub's blob CDN is not reachable through
@@ -36,11 +37,12 @@ rather than letting Prisma fail with a bare "unable to open database file".
 If you do need a bind mount, `chown` the host directory to uid 1000 or run
 with `--user $(id -u):$(id -g)`.
 
-First boot applies migrations and seeds 10 holes / 26 puzzles from
+First boot applies migrations and seeds 20 holes / 36 puzzles from
 `data/holes/*.json`, warming a heatmap grid per puzzle at the seed profile
-(~14s). Restarts re-run both: `migrate deploy` finds nothing pending and the
-seed upserts by id, so player progress — which lives in rows the seed never
-touches — survives.
+(~20s). Restarts re-run both, but cheaply: `migrate deploy` finds nothing
+pending and the seed leaves alone any hole already present with identical
+geometry and warm grids, so a warm restart is ~2s. Player progress lives in
+rows the seed never touches and survives either way.
 
 ### Environment
 
@@ -91,12 +93,52 @@ The one thing that does not port for free is `HeatmapCache.grid`, a JSON
 string in a `TEXT` column. It works as-is on Postgres; `jsonb` would be
 better if anything ever needs to query inside it. Nothing does today.
 
-## Hosting notes
+## Hosting
 
-Any host that runs a container with a persistent volume works — Fly, Railway,
-Render, a VPS. Vercel does not: the filesystem is ephemeral, so SQLite loses
-every attempt on each deploy. Move to Postgres first if that is the target.
+**Fly is the best fit, and the reason is SQLite.** Its unit of deployment is
+one machine with one attached volume, which is exactly this app's shape; it
+can suspend to zero and wake on a request, which suits a personal trainer
+that is idle most of the day; and it is the cheapest always-on option of the
+candidates. `fly.toml` in the repo root is ready to use:
 
-Scaling is single-instance by construction. Two replicas against one SQLite
-file will corrupt it. That limit is fine for the size this product is, and
-Postgres removes it.
+```bash
+fly launch --no-deploy --copy-config --name <your-app>
+fly volumes create sg_data --size 1 --region lhr --yes
+fly deploy --image ghcr.io/jamessvolos/golfcms:latest
+```
+
+The one rule: **keep it at a single machine.** Two machines cannot share a
+Fly volume, and two machines with separate volumes would each hold a
+divergent copy of every player's progress. `fly scale count 1` if it drifts.
+
+The alternatives, and why they lose:
+
+| Host | Verdict |
+| --- | --- |
+| **Railway** | Works well — image deploy plus a volume at `/data`. Slightly simpler UI, no scale-to-zero, so you pay for idle. |
+| **Render** | Works, but persistent disks require a paid instance type; the free tier has no disk at all, which silently means no saved progress. |
+| **A VPS** | Most control and predictable cost, but you own the OS, TLS and updates for what is one `docker run`. |
+| **Vercel** | Does not work. The filesystem is ephemeral, so SQLite loses every attempt on each deploy. Move to Postgres first if this is the target. |
+
+### Restarts are cheap, first boot is not
+
+Seeding recomputes a Monte Carlo grid per puzzle, which is ~20 seconds for
+the shipped library. The seed skips any hole already present with identical
+geometry and warm grids at the seed bucket, so a restart on a populated
+volume costs about 2 seconds and a redeploy is not 20 seconds of downtime.
+CI asserts this — a warm restart that takes over 20 seconds fails the build,
+because the failure mode is silent and only shows up as slow deploys.
+
+`SG_SEED_FORCE=1` re-ingests everything regardless, which is what you want
+after changing an engine constant that does not bump `GRID_VERSION`.
+
+### Before it is public
+
+There is no auth. `/admin/annotate` and `/admin/import` are reachable by
+anyone who finds them, and the import endpoint will happily spend your CPU
+on Overpass queries. That is fine behind a private URL and not fine on a
+public one — put a shared-secret gate on `/admin` and `/api/admin` first.
+
+The GHCR package is private by default. Either make it public in the
+repository's Packages settings, or `docker login ghcr.io` on the host with a
+token that has `read:packages`.
