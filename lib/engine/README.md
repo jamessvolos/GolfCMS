@@ -103,3 +103,56 @@ npm test        # unit tests
 npm run demo    # ASCII expected-strokes contours + optimal aim for a
                 # 5-handicap vs a 20-handicap on the cape hole
 ```
+
+## Rejected: one-step lookahead
+
+A landing point is valued by `strokesToHoleOut(distance, lie)` — a table
+lookup that does not know *where* the ball is, only how far out and what it
+sits on. That is why long holes have no decision in them: two balls the same
+distance out in the fairway are worth the same whether the green is open or
+blocked, so the only thing an aim controls is the distribution over
+(distance, lie), and the optimum is "as far as you can down the widest
+part", which is what aiming at the flag already does. Every puzzle in the
+library scoring 0.32 or better is a par-3 tee shot, where the landing lie
+*is* the outcome.
+
+The obvious fix is to value a landing point by playing the next shot from
+it. It was prototyped and measured, and it is worse. Across the landing
+zones of three long holes, comparing the table value against the best-of-
+candidates expected strokes of the following shot:
+
+```
+carnoustie-18, 270y out, every position 217–222y from the pin
+  lateral   lie        table   lookahead
+    -50y    rough      4.234   3.714
+    -20y    fairway    3.823   3.560
+      0y    fairway    3.817   3.552
+    +50y    rough      4.234   3.707
+```
+
+Two things to read there. Lookahead barely varies with lateral position
+within a lie — 0.008 of a stroke across the fairway — because the model has
+no mechanism by which position can matter. There is no line of sight,
+nothing blocks, and a green is equally reachable from anywhere in range.
+Lookahead can only propagate information the model already contains, and
+the model contains no angle.
+
+Worse, it *compresses* the fairway-to-rough gap from 0.38 strokes to 0.13,
+because it assumes the player recovers optimally. So it makes trap sizes
+smaller, not larger — the opposite of the intent. The prototype confirmed
+this end to end: Carnoustie 18's tee shot scored a trap of 0.00 under both
+models.
+
+There is also a consistency argument against it. The baselines are
+empirical: they measure what actually happens from 218 yards in the rough,
+across real players who often cannot advance it. Replacing one level of that
+with an optimistic model and then falling back to the empirical table below
+it mixes two different things and trusts the result. A full rollout would at
+least be consistent, but it would drift away from the measured numbers that
+make the engine's claims defensible in the first place.
+
+**What would actually make position matter is an obstruction model** —
+line of sight, trees that block, a dune you must carry — which is a real
+mechanism rather than more search over the existing one. It carries a
+content cost (someone has to map what blocks) and should not be started
+without deciding that is the product.
