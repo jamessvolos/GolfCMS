@@ -3059,34 +3059,6 @@
   },
   "puzzles": [
     {
-      "id": "county-down-12-approach-3",
-      "ball": {
-        "lon": -5.875972989,
-        "lat": 54.224788175
-      },
-      "pin": {
-        "lon": -5.8758352,
-        "lat": 54.22508565
-      },
-      "lie": "fairway",
-      "category": "approach",
-      "description": "Approach from the fairway, 38 yards to the flag."
-    },
-    {
-      "id": "county-down-12-layup-2",
-      "ball": {
-        "lon": -5.877020712,
-        "lat": 54.22293891
-      },
-      "pin": {
-        "lon": -5.8758352,
-        "lat": 54.22508565
-      },
-      "lie": "fairway",
-      "category": "layup",
-      "description": "Lay-up from the fairway, 275 yards to the flag."
-    },
-    {
       "id": "county-down-12-tee-1",
       "ball": {
         "lon": -5.8785468,

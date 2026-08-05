@@ -12,7 +12,10 @@ import {
 import { holeDataFromInput } from '@/lib/server/ingestHole';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
 
-const FAST = { nSamples: 120 };
+// Assembly tests care about geometry, not selection, so they keep every
+// derived puzzle. MESSY_COURSE is a wide-open synthetic hole with no
+// decision in it, which the default threshold correctly refuses.
+const FAST = { nSamples: 120, minTrap: 0 };
 
 describe('slugify', () => {
   it('makes a schema-legal id from a course name', () => {
@@ -137,6 +140,36 @@ describe('previewFromResponse', () => {
     expect(() =>
       previewFromResponse({ elements: [] }, { holeNumber: 1, course: 'Nowhere GC', ...FAST }),
     ).toThrow(/no golf course matches that name/);
+  });
+
+  it('refuses a hole with no decision in it', () => {
+    // MESSY_COURSE is 400 yards of open ground: aiming at the flag is
+    // already optimal, so every band would be PERFECT for no thought.
+    expect(() =>
+      previewFromResponse(MESSY_COURSE, { holeNumber: 7, course: 'Messy Links', nSamples: 120 }),
+    ).toThrow(/no puzzle on this hole carries a decision/);
+  });
+
+  it('drops the flat puzzles on a hole that has a good one', () => {
+    // Same hole, but with a threshold low enough that the tee puzzle
+    // survives and anything derived after it does not.
+    const preview = previewFromResponse(MESSY_COURSE, {
+      holeNumber: 7,
+      course: 'Messy Links',
+      nSamples: 120,
+      minTrap: 0,
+    });
+    const filtered = previewFromResponse(MESSY_COURSE, {
+      holeNumber: 7,
+      course: 'Messy Links',
+      nSamples: 120,
+      minTrap: 0.0001,
+    });
+    expect(filtered.input.puzzles.length).toBeLessThanOrEqual(preview.input.puzzles.length);
+    // Ids renumber after dropping, so a hole never ships with a gap.
+    filtered.input.puzzles.forEach((p, i) => {
+      expect(p.id).toBe(`${filtered.input.hole.id}-${p.category}-${i + 1}`);
+    });
   });
 
   it('names the hole from an explicit id when one is given', () => {

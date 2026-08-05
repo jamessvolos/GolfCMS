@@ -35,6 +35,12 @@ export interface DeriveOptions {
   profile?: PlayerProfile;
   /** Monte Carlo samples; the default is the engine's. Lower it for speed. */
   nSamples?: number;
+  /**
+   * Drop puzzles whose trap size falls below this — puzzles where aiming
+   * at the flag is already optimal, so the game awards PERFECT for no
+   * thought. 0 keeps everything, which is what the survey wants.
+   */
+  minTrap?: number;
 }
 
 export interface DeriveResult {
@@ -97,6 +103,48 @@ export function derivePuzzles(
   hole: IngestInput['hole'],
   opts: DeriveOptions = {},
 ): DeriveResult {
+  const built = buildPuzzles(hole, opts);
+  const minTrap = opts.minTrap ?? 0;
+  if (minTrap <= 0) return built;
+
+  // Measure what we are about to ship. Across the shipped library every
+  // puzzle scoring 0.32 or better is a par-3 tee shot; derived approaches
+  // land between 0.00 and 0.19 even at the same distance and dispersion,
+  // because an approach arrives through the opening the architect left
+  // while a par-3 green is defended on every side. Rather than encode that
+  // as a rule about categories, ask the engine per puzzle.
+  const profile = opts.profile ?? bucketedProfile(SEED_PROFILE);
+  const prepared = prepareHole(holeDataFromInput(hole));
+  const kept: Puzzle[] = [];
+  const notes = [...built.notes];
+
+  for (const p of built.puzzles) {
+    const summary = computeGridSummary(
+      prepared,
+      { ball: prepared.toLocal(p.ball), pin: prepared.pin, lie: p.lie },
+      profile,
+      p.category,
+      opts.nSamples ? { nSamples: opts.nSamples } : {},
+    );
+    if (summary.trapSize >= minTrap) {
+      kept.push(p);
+    } else {
+      notes.push(
+        `dropped the ${p.category} puzzle — trap ${summary.trapSize.toFixed(2)} is below ` +
+          `${minTrap.toFixed(2)}, so aiming at the flag is already optimal`,
+      );
+    }
+  }
+
+  // Ids number from 1 in play order; renumber after dropping so a hole
+  // never ships with a gap in its puzzle ids.
+  return {
+    puzzles: kept.map((p, i) => ({ ...p, id: `${hole.id}-${p.category}-${i + 1}` })),
+    notes,
+  };
+}
+
+function buildPuzzles(hole: IngestInput['hole'], opts: DeriveOptions): DeriveResult {
   const profile = opts.profile ?? bucketedProfile(SEED_PROFILE);
   const prepared = prepareHole(holeDataFromInput(hole));
   const notes: string[] = [];

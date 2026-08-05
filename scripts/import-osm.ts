@@ -6,6 +6,10 @@
  *   npm run content:import -- --file saved.json --hole 12 --course "Birkdale"
  *   npm run content:import -- --course "Royal Birkdale" --survey
  *
+ * A hole whose every derived puzzle has the flag as its optimal aim is
+ * refused: it would award PERFECT for no thought. `--min-trap 0` imports it
+ * anyway.
+ *
  * Dry-run by default: it prints what it found, what it threw away, and the
  * derived puzzles, and writes nothing. `--commit` sends it through the same
  * ingest path a traced hole takes. `--out` writes the payload to
@@ -73,6 +77,7 @@ const req: ImportRequest = {
   ...(arg('corridor') ? { corridorYds: Number(arg('corridor')) } : {}),
   ...(arg('radius') ? { radius: Number(arg('radius')) } : {}),
   ...(arg('samples') ? { nSamples: Number(arg('samples')) } : {}),
+  ...(arg('min-trap') ? { minTrap: Number(arg('min-trap')) } : {}),
 };
 
 /**

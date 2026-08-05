@@ -3946,20 +3946,6 @@
   },
   "puzzles": [
     {
-      "id": "carnoustie-17-approach-2",
-      "ball": {
-        "lon": -2.722406694,
-        "lat": 56.495770425
-      },
-      "pin": {
-        "lon": -2.7253921,
-        "lat": 56.495093
-      },
-      "lie": "fairway",
-      "category": "approach",
-      "description": "Approach from the fairway, 217 yards to the flag."
-    },
-    {
       "id": "carnoustie-17-tee-1",
       "ball": {
         "lon": -2.71906415,

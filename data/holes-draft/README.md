@@ -75,9 +75,11 @@ So these five stay benched, and the lesson is about selection rather than
 extraction: survey a course, import its par 3s and its short strategic
 holes, and do not expect a famous long hole to be a good puzzle.
 
-One open thread worth someone's time: every derived *approach* puzzle also
-came in near 0.00, on good holes as well as flat ones. That is likely
-`derivePuzzles` placing the approach ball at the previous shot's optimal
-aim — the ideal position, from which the approach is by construction
-easiest. Deriving it from a dispersed outcome instead would probably
-produce the awkward positions that make approach puzzles interesting.
+That thread about approaches is now closed, and the guess in it was wrong.
+Offsetting the approach ball by ±1.5σ in every direction — including into
+rough — left the trap at 0.00–0.01, so the ideal position was not the
+cause. Measuring the whole library against distance showed the real shape:
+every puzzle scoring 0.32 or better is a par-3 tee shot, and approaches
+score 0.00–0.19 even at matched distance and dispersion. The importer now
+measures each derived puzzle and refuses to ship one below 0.10, so these
+five holes are refused outright rather than imported and benched.

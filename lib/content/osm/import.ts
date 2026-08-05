@@ -8,6 +8,7 @@
 import { assembleHole, describeCandidate, findHoleWays, AssembleError } from './assemble';
 import { derivePuzzles } from './puzzles';
 import { matchedCourses, queryAround, queryCourse, runQuery } from './overpass';
+import { DECISION_THRESHOLD } from './survey';
 import type { OverpassResponse } from './overpass';
 import { ingestHole, ingestSchema } from '@/lib/server/ingestHole';
 import type { IngestInput, IngestResult } from '@/lib/server/ingestHole';
@@ -27,6 +28,11 @@ export interface ImportRequest {
   radius?: number;
   /** Monte Carlo samples for puzzle derivation. Lower is faster, coarser. */
   nSamples?: number;
+  /**
+   * Minimum trap size a derived puzzle must carry to be shipped. Defaults
+   * to DECISION_THRESHOLD; pass 0 to keep everything.
+   */
+  minTrap?: number;
 }
 
 export interface ImportPreview {
@@ -104,9 +110,16 @@ export function previewFromResponse(res: OverpassResponse, req: ImportRequest): 
   // the map render the ODbL credit this data is licensed under.
   input.hole.source = 'osm';
 
-  const derived = derivePuzzles(input.hole, req.nSamples ? { nSamples: req.nSamples } : {});
+  const derived = derivePuzzles(input.hole, {
+    ...(req.nSamples ? { nSamples: req.nSamples } : {}),
+    minTrap: req.minTrap ?? DECISION_THRESHOLD,
+  });
   if (!derived.puzzles.length) {
-    throw new AssembleError('no playable puzzle could be derived for this hole');
+    throw new AssembleError(
+      'no puzzle on this hole carries a decision — every derived position ' +
+        'has the flag as its optimal aim, so the hole would award PERFECT ' +
+        'for no thought. Survey the course (--survey) to find one that does.',
+    );
   }
 
   const full = { ...input, puzzles: derived.puzzles };

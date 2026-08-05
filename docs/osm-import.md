@@ -72,6 +72,37 @@ Every decision it made is listed in `notes` — reversals, inferred par,
 dropped features, distrusted tags. Read them. The importer is allowed to be
 wrong; it is not allowed to be quiet.
 
+## Every shipped puzzle carries a decision
+
+The importer measures each puzzle it derives and refuses to ship one whose
+trap size falls below 0.10 — a puzzle where aiming at the flag is already
+optimal, so the game awards PERFECT for no thought. A hole where nothing
+clears the bar is refused outright. `--min-trap 0` overrides it.
+
+That threshold is not taste, it is measured. Across the shipped library
+every puzzle scoring 0.32 or better is a **par-3 tee shot**, and there are
+eight of them. Derived approaches score 0.00–0.19 even at matched distance
+and dispersion: at roughly 180 yards, par-3 tee shots come in at 0.88 and
+0.95 while approaches from the same range come in at 0.00, 0.11 and 0.19.
+
+Two hypotheses were tested and rejected before this one:
+
+- *The corridor is too narrow, so the penalty field is flat.* Sweeping
+  80/120/160/220 yards moved five of eight holes not at all, and the two
+  that moved were artefacts — at 220y Carnoustie's 17th put its optimal
+  line 79 yards off-axis onto the next hole's fairway.
+- *The approach ball sits in the ideal position, which is by construction
+  the easiest.* Offsetting it by ±1.5σ laterally and longitudinally left
+  the trap at 0.00–0.01 in every direction, including into rough.
+
+The likeliest explanation is architectural rather than mechanical: a par-3
+green is defended on every side because that is the whole hole, and bailing
+out is a real option with a real cost. An approach arrives from the fairway
+through the opening the architect left. Rather than encode that as a rule
+about categories, the importer asks the engine per puzzle — which also
+covers the par 3 that happens to be dull and the approach that happens to
+be excellent.
+
 ## How puzzle positions are chosen
 
 The tee puzzle is free. Each puzzle after it starts where the optimizer's
