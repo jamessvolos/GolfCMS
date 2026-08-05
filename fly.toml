@@ -18,6 +18,14 @@ primary_region = "lhr"
   DATABASE_URL = "file:/data/sg.db"
   PORT = "3000"
 
+# SG_ADMIN_SECRET gates /admin and /api/admin. It is NOT set here — it is a
+# secret, and fly.toml is committed. Set it before the first deploy:
+#
+#   fly secrets set SG_ADMIN_SECRET=$(openssl rand -base64 24)
+#
+# Without it the app still serves players and returns 503 on /admin, so a
+# forgotten secret is a visible failure rather than an open door.
+
 [mounts]
   source = "sg_data"
   destination = "/data"

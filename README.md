@@ -25,11 +25,11 @@ Full product spec: [docs/spec.md](docs/spec.md)
   attempts and Elo persisted.
 - ✅ **Milestone 4 — annotation studio + content.** `/admin/annotate`
   traces holes over live satellite imagery into one validated ingest
-  pipeline; 13 holes / 30 puzzles ship as committed `data/holes/*.json`
-  (Sawgrass 17 & 18, Pebble 8 & 18, Bay Hill 18, Scottsdale 17, Harbour
-  Town 18, Doral 18, the Road Hole and the synthetic cape fixture, plus
-  Royal County Down 4, Royal Birkdale 12 and Carnoustie 17 imported from
-  OpenStreetMap).
+  pipeline; 20 holes / 36 puzzles ship as committed `data/holes/*.json` —
+  ten hand-traced (Sawgrass 17 & 18, Pebble 8 & 18, Bay Hill 18, Scottsdale
+  17, Harbour Town 18, Doral 18, the Road Hole and the synthetic cape
+  fixture) and ten imported from OpenStreetMap (Royal County Down 4, 7, 10,
+  12 & 14, Royal Birkdale 4, 7, 12 & 14, Carnoustie 17).
 - ✅ **Milestone 5 — progression.** `/play` serves puzzles near your rating
   (±150, widening as needed); XP by band with an upset bonus, levels every
   500 XP, inked tally-mark streaks, per-category accuracy, and a `/summary`
@@ -88,10 +88,13 @@ docker run -p 3000:3000 -v sg-data:/data sg-trainer
 ```
 
 One container, one SQLite file on a volume; first boot migrates and seeds
-itself. Full notes — environment, the Postgres path, why Vercel doesn't
-work — in [docs/deploy.md](docs/deploy.md). CI runs typecheck, migration
-drift, tests, the content audit, the production build, and a Docker
-build-and-boot on every push.
+itself, and restarts skip content that has not changed. `fly.toml` is in the
+repo — Fly suits a SQLite app that idles. Set `SG_ADMIN_SECRET` before
+exposing it: `/admin` and `/api/admin` are gated, and in production an unset
+secret disables them rather than exposing them. Full notes in
+[docs/deploy.md](docs/deploy.md). CI runs typecheck, migration drift, tests,
+the content audit, the production build, and a Docker build-and-boot that
+also asserts admin is closed and a warm restart is fast.
 
 ## Layout
 

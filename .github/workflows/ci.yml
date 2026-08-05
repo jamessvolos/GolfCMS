@@ -89,6 +89,28 @@ jobs:
           echo "::error::container never served the listing on :3000"
           exit 1
 
+      # The container sets NODE_ENV=production and this run passes no
+      # SG_ADMIN_SECRET, which is exactly the deploy-and-forget case: admin
+      # must be closed, not open. Player routes must be untouched.
+      - name: Admin is closed without a secret
+        run: |
+          fail=0
+          check() {
+            got=$(curl -sS -o /dev/null -w '%{http_code}' "http://localhost:3000$1")
+            if [ "$got" != "$2" ]; then
+              echo "::error::$1 returned $got, expected $2"
+              fail=1
+            else
+              echo "  $1 → $got"
+            fi
+          }
+          check /                 200
+          check /settings         200
+          check /admin/annotate   503
+          check /admin/import     503
+          check /api/admin/holes  503
+          exit $fail
+
       # Restarting must not re-ingest content that has not changed. Boot
       # seeds from data/holes, and recomputing a Monte Carlo grid per puzzle
       # costs ~27s for the shipped library — which would be 27s of downtime

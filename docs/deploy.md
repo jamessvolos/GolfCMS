@@ -132,12 +132,49 @@ because the failure mode is silent and only shows up as slow deploys.
 `SG_SEED_FORCE=1` re-ingests everything regardless, which is what you want
 after changing an engine constant that does not bump `GRID_VERSION`.
 
-### Before it is public
+### Admin is gated; set the secret
 
-There is no auth. `/admin/annotate` and `/admin/import` are reachable by
-anyone who finds them, and the import endpoint will happily spend your CPU
-on Overpass queries. That is fine behind a private URL and not fine on a
-public one — put a shared-secret gate on `/admin` and `/api/admin` first.
+`/admin` and `/api/admin` sit behind a shared secret (`SG_ADMIN_SECRET`).
+There are still no user accounts — there is one operator and these are
+annotation tools, not a product — but leaving them open would let anyone who
+finds the URL write content and spend the host's CPU on Overpass queries.
+
+```bash
+fly secrets set SG_ADMIN_SECRET=$(openssl rand -base64 24)
+```
+
+Behaviour, which is deliberately blunt:
+
+| Environment | Secret | Result |
+| --- | --- | --- |
+| production | set (≥16 chars) | `401` until presented, then through |
+| production | **unset** | `503` — admin disabled, players unaffected |
+| production | shorter than 16 | `503` — nothing rate-limits, so a short secret is not a gate |
+| development | unset | open, so `npm run dev` is usable |
+| development | set | enforced, because configuring it means you want it |
+
+The unset-in-production case is a `503` rather than a `401` on purpose: a
+`401` invites a browser to prompt for a credential the server has no way to
+check. It fails closed because the alternative — a deployment that believes
+it is protected and is not — is the exact mistake this exists to prevent.
+CI asserts it on the built image.
+
+Four ways to present it, all equivalent:
+
+```bash
+curl -u ":$SECRET"                    https://app/api/admin/holes
+curl -u "$SECRET:"                    https://app/api/admin/holes
+curl -H "Authorization: Bearer $SECRET" https://app/api/admin/holes
+curl -H "x-admin-secret: $SECRET"     https://app/api/admin/holes
+```
+
+In a browser, visiting `/admin/import` prompts; any username works.
+
+What this is not: it is one secret with no rotation, no per-user identity,
+no lockout and no audit trail. It is the right size for one operator behind
+a URL, and it is not the right size for a team.
+
+### The container image
 
 The GHCR package is private by default. Either make it public in the
 repository's Packages settings, or `docker login ghcr.io` on the host with a
