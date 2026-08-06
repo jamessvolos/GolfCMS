@@ -22,6 +22,7 @@
     "content:import": "tsx scripts/import-osm.ts",
     "content:export": "tsx scripts/export-content.ts",
     "content:audit": "tsx scripts/audit-content.ts",
+    "content:positions": "tsx scripts/position-sweep.ts",
     "explain:golden": "tsx scripts/explain-golden.ts"
   },
   "repository": {
