@@ -47,6 +47,15 @@ export interface EvalOptions {
    * thousands of candidate evaluations stay lean.
    */
   stats?: boolean;
+  /**
+   * Filled with the per-sample cost of each landing, in sample order.
+   * Under common random numbers two aims evaluated with the same `normals`
+   * produce paired costs, and the standard error of their difference is
+   * far smaller than the difference of two independent standard errors —
+   * which is what makes an error bar on `trapSize` affordable. Must be at
+   * least `normals.length >> 1` long.
+   */
+  costs?: Float64Array;
 }
 
 export function evaluateAim(
@@ -131,6 +140,7 @@ export function evaluateAim(
       cost = 1 + strokesToHoleOut(pinDist, landingLie, profile.handicap);
     }
     totalCost += cost;
+    if (opts.costs) opts.costs[i] = cost;
   }
 
   const lieBreakdown: Partial<Record<LandingLie, number>> = {};

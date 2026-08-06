@@ -60,6 +60,8 @@ export interface GridSummary {
   /** The pin as an aim, when it isn't already the naive aim (tee shots). */
   pinAim: { local: Pt; e: number; result: EvalResult } | null;
   trapSize: number;
+  /** Standard error of trapSize; see EvalGrid.trapSe. */
+  trapSe: number;
   brief: GridBrief;
 }
 
@@ -189,6 +191,7 @@ export function computeGridSummary(
     },
     pinAim,
     trapSize: grid.trapSize,
+    trapSe: grid.trapSe,
     brief: buildBrief(grid, sit, profile),
   };
 }

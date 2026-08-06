@@ -10,6 +10,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { kinks, polygon as turfPolygon } from '@turf/turf';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
+import { DECISION_TRAP } from '@/lib/engine/constants';
+import { measureLibrary } from './rating-drift';
 import { dist } from '@/lib/engine/projection';
 import { holeDataFromInput, ingestSchema } from '@/lib/server/ingestHole';
 
@@ -114,4 +116,26 @@ for (const file of files) {
 console.log(
   `\n${files.length} holes audited — ${failures} with problems, ${warnings} with warnings`,
 );
+
+// The decision census. Geometry can be flawless and the content still be
+// worthless: a hole whose every puzzle has the flag as its optimal aim
+// awards PERFECT for a reflex. This is not a build failure while the
+// shipped library is the only supply — it is the number the miner exists to
+// move, so it is printed on every audit and asserted in CI once Wave 3
+// lands a pack.
+if (!process.argv.includes('--no-decisions')) {
+  const rows = measureLibrary();
+  const serving = rows.filter((r) => r.serves);
+  const ses = rows.map((r) => r.trapSe).sort((a, b) => a - b);
+  console.log(
+    `\nDecision census — ${serving.length} of ${rows.length} puzzles hold a decision ` +
+      `(trap − 2·SE ≥ ${DECISION_TRAP.toFixed(2)}); SE median ${ses[ses.length >> 1]!.toFixed(3)} strokes.`,
+  );
+  for (const r of serving.sort((a, b) => b.trap - a.trap)) {
+    console.log(
+      `    ✓ ${r.puzzleId.padEnd(26)} trap ${r.trap.toFixed(3)} ± ${r.trapSe.toFixed(3)}  rating ${r.rating}`,
+    );
+  }
+}
+
 if (failures) process.exitCode = 1;

@@ -7,7 +7,8 @@ const c = (
   rating: number,
   attempts = 0,
   lastPlayedAt: number | null = null,
-): QueueCandidate => ({ id, rating, attempts, lastPlayedAt });
+  serves = true,
+): QueueCandidate => ({ id, rating, attempts, lastPlayedAt, serves });
 
 describe('pickNext', () => {
   it('returns null with no candidates', () => {
@@ -60,5 +61,35 @@ describe('pickNext', () => {
     expect(pickNext(pool, 1000)?.puzzleId).toBe('easy');
     expect(pickNext(pool, 1320)?.puzzleId).toBe('mid');
     expect(pickNext(pool, 1550)?.puzzleId).toBe('hard');
+  });
+});
+
+describe('pickNext and situations with no decision in them', () => {
+  it('never serves a decisionless puzzle while a real one is available', () => {
+    // The flat one sits exactly on the player's rating and is unseen; on
+    // rating proximity alone it wins every time. It must still lose.
+    const pool = [
+      c('flat', 1200, 0, null, false),
+      c('real', 1560, 0, null, true),
+    ];
+    expect(pickNext(pool, 1200)?.puzzleId).toBe('real');
+  });
+
+  it('falls back rather than serving nothing', () => {
+    // Measured on the shipped library: 32 of 36 puzzles do not clear the
+    // gate. Until the miner lands, refusing to serve them would leave a
+    // player who has exhausted the four with an empty app.
+    const pool = [c('flat-a', 1000, 0, null, false), c('flat-b', 1180, 0, null, false)];
+    expect(pickNext(pool, 1200)?.puzzleId).toBe('flat-b');
+  });
+
+  it('reviews a played decision before serving an unseen non-decision', () => {
+    const pool = [
+      c('seen-real', 1200, 3, 1000, true),
+      c('unseen-flat', 1200, 0, null, false),
+    ];
+    const pick = pickNext(pool, 1200);
+    expect(pick?.puzzleId).toBe('seen-real');
+    expect(pick?.repeat).toBe(true);
   });
 });

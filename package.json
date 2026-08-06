@@ -23,6 +23,7 @@
     "content:export": "tsx scripts/export-content.ts",
     "content:audit": "tsx scripts/audit-content.ts",
     "content:positions": "tsx scripts/position-sweep.ts",
+    "content:drift": "tsx scripts/rating-drift.ts",
     "explain:golden": "tsx scripts/explain-golden.ts"
   },
   "repository": {

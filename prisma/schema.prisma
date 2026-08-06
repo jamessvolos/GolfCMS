@@ -56,6 +56,10 @@ model Puzzle {
   description  String    @default("")
   rating       Int       @default(1000)
   trapSize     Float     @default(0)
+  /// Standard error of trapSize. A rating is a Monte Carlo estimate; this
+  /// is how far it can be trusted, and the serving gate reads
+  /// trapSize - 2*trapSe rather than the point estimate.
+  trapSe       Float     @default(0)
   hole         Hole      @relation(fields: [holeId], references: [id])
   attempts     Attempt[]
   heatmaps     HeatmapCache[]

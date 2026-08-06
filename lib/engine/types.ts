@@ -244,6 +244,14 @@ export interface EvalGrid {
   naive: { point: Pt; expectedStrokes: number; result: EvalResult };
   /** E[naive] − E[optimal]; non-negative by construction. */
   trapSize: number;
+  /**
+   * Standard error of `trapSize`, from the per-sample difference between
+   * the reference and optimal aims under common random numbers. A rating
+   * is a Monte Carlo estimate; this is how far it can be trusted, and the
+   * admission gate reads `trapSize − 2·SE` rather than the point estimate
+   * because the rating curve is steepest where the estimate is noisiest.
+   */
+  trapSe: number;
 }
 
 export interface ScoreBandResult {

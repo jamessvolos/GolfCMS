@@ -83,7 +83,7 @@ export type IngestInput = z.infer<typeof ingestSchema>;
 export interface IngestResult {
   holeId: string;
   yardage: number;
-  puzzles: { id: string; rating: number; trapSize: number }[];
+  puzzles: { id: string; rating: number; trapSize: number; trapSe: number }[];
   warnings: string[];
 }
 
@@ -300,6 +300,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       description: p.description,
       rating,
       trapSize: summary.trapSize,
+      trapSe: summary.trapSe,
     };
     await db.puzzle.upsert({ where: { id }, create: { id, ...data }, update: data });
 
@@ -315,7 +316,7 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
         optimalE: summary.optimal.e,
       },
     });
-    results.push({ id, rating, trapSize: summary.trapSize });
+    results.push({ id, rating, trapSize: summary.trapSize, trapSe: summary.trapSe });
   }
 
   // Re-annotation with a smaller puzzle set removes the orphans (and their

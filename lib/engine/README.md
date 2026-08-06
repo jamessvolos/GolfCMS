@@ -104,17 +104,44 @@ npm run demo    # ASCII expected-strokes contours + optimal aim for a
                 # 5-handicap vs a 20-handicap on the cape hole
 ```
 
+## The reference aim
+
+`trapSize` is the cost of the shot a player makes *without thinking*, and
+what counts as that shot is a modelling decision, not a detail.
+`referenceAim` owns it: **aim at the flag if you can reach it, otherwise as
+far as you can down the middle.**
+
+Both halves matter, and both were got wrong before Wave 1. Choosing by
+category name — fairway centre at driver distance for every `tee` puzzle —
+scored a 119-yard par 3 against a driver and rated it the hardest puzzle in
+the app. Choosing the flag unconditionally is worse in the other direction:
+from 453 yards "aim at the flag" is not a behaviour, it is the aim clamp
+firing a driver down the flag line, and on a hole with water there it books
+a trap of 1.841 for a decision nobody was making. `optimize.test.ts` guards
+that case explicitly, because the miner searches for high trap sizes and
+would otherwise mass-produce it.
+
+Ratings are Monte Carlo estimates and carry `trapSe`, the paired standard
+error of the reference-minus-optimal difference under common random
+numbers. Nothing is served unless `trapSize − 2·trapSe` clears
+`DECISION_TRAP`.
+
 ## Rejected: one-step lookahead
 
 A landing point is valued by `strokesToHoleOut(distance, lie)` — a table
 lookup that does not know *where* the ball is, only how far out and what it
-sits on. That is why long holes have no decision in them: two balls the same
-distance out in the fairway are worth the same whether the green is open or
-blocked, so the only thing an aim controls is the distribution over
-(distance, lie), and the optimum is "as far as you can down the widest
-part", which is what aiming at the flag already does. Every puzzle in the
-library scoring 0.32 or better is a par-3 tee shot, where the landing lie
-*is* the outcome.
+sits on. Two balls the same distance out in the fairway are worth the same
+whether the green is open or blocked, so within a lie an aim controls only
+the distribution over (distance, lie).
+
+> **Correction (Wave 1).** This section used to conclude from that "long
+> holes have no decision in them ... the optimum is as far as you can down
+> the widest part, which is what aiming at the flag already does", and cited
+> the library's trap sizes as proof. Those trap sizes were computed against
+> a reference aim that had *already made the course-management decision for
+> the player* — see above. The measurement below stands, because it compares
+> two ways of valuing a landing point and never touches the reference aim.
+> The conclusion drawn on top of it did not, and has been removed.
 
 The obvious fix is to value a landing point by playing the next shot from
 it. It was prototyped and measured, and it is worse. Across the landing

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import PuzzleScreen from '@/components/puzzle/PuzzleScreen';
 import { getProfile, getPuzzleWithHole, listPuzzles } from '@/lib/server/content';
+import { ratingUncertainty } from '@/lib/engine/scoring';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,7 @@ export default async function PuzzlePage({ params }: { params: Promise<{ id: str
           </div>
           <span className="mono-nums text-[12px] text-ink-soft">
             {puzzle.lie.toUpperCase()} LIE · PUZZLE {puzzle.rating}
+            {puzzle.serves ? ` ±${ratingUncertainty(puzzle.trapSize, puzzle.trapSe)}` : ' · NO DECISION'}
           </span>
         </div>
         <h1 className="mt-1 font-display text-[clamp(24px,4.5vw,34px)] leading-tight">

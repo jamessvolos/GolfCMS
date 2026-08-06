@@ -236,6 +236,35 @@ export const PUZZLE_RATING_BASE = 1000;
 export const PUZZLE_RATING_SPAN = 1500;
 export const PUZZLE_RATING_HALF_TRAP = 0.35;
 
+/**
+ * The trap size below which a situation has nothing to teach: aiming where
+ * you were going to aim anyway is already right. Chosen from the shipped
+ * library rather than taste — its median tee trap was 0.05 and four of
+ * thirty puzzles sat at exactly 0.00.
+ *
+ * The rating curve's floor, not just a filter. A curve whose base sits at
+ * trap 0 spends its first 300 points rating the difference between two
+ * puzzles that both have no decision in them; anchoring the floor here
+ * means rating 1000 is "exactly at the threshold of being worth asking".
+ */
+export const DECISION_TRAP = 0.1;
+
+/**
+ * Ratings are Monte Carlo estimates, so they carry an error bar. Two
+ * standard errors is the margin a trap must clear the threshold by before a
+ * situation is served — the gate is on `trap − 2·SE`, not on the point
+ * estimate, because the rating curve is steepest exactly where the estimate
+ * is noisiest.
+ */
+export const TRAP_SE_MARGIN = 2;
+
+/**
+ * Bumped whenever a change moves stored ratings. `content:audit` fails when
+ * a shipped puzzle's rating was computed under a different version, so a
+ * re-rating cannot be forgotten.
+ */
+export const RATING_VERSION = 1;
+
 // ---------------------------------------------------------------------------
 // Profile bucketing (heatmap cache key)
 // ---------------------------------------------------------------------------

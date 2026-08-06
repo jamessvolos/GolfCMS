@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getProfile, listPuzzles } from '@/lib/server/content';
 import { profileBucket } from '@/lib/engine/profile';
+import { ratingUncertainty } from '@/lib/engine/scoring';
 import { getProgress } from '@/lib/server/progress';
 import TallyStreak from '@/components/progress/TallyStreak';
 import Sparkline from '@/components/progress/Sparkline';
@@ -113,7 +114,16 @@ export default async function Home() {
                           {puzzle.description}
                         </span>
                         <span className="mono-nums text-[11.5px] text-ink-soft">
-                          rating {puzzle.rating}
+                          {puzzle.serves ? (
+                            <>
+                              rating {puzzle.rating} ±
+                              {ratingUncertainty(puzzle.trapSize, puzzle.trapSe)}
+                            </>
+                          ) : (
+                            <span title="Aiming at the flag is already optimal here — there is no decision to score.">
+                              no decision
+                            </span>
+                          )}
                         </span>
                       </Link>
                     ))}

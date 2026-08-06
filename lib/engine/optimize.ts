@@ -6,9 +6,11 @@
  * bounded around the ball→pin corridor. Every in-sector cell is evaluated
  * with common random numbers; optimal = argmin.
  *
- * The naive aim (rating seed) is the pin for approach-style puzzles, or
- * fairway center at driver distance for tee shots. trapSize =
- * E[naive] − E[optimal] measures how punishing the "obvious" play is.
+ * The reference aim (rating seed) is the shot a player makes without
+ * thinking, and `trapSize = E[reference] − E[optimal]` is what that costs
+ * them. Getting the reference wrong does not add noise to a rating — it
+ * changes which puzzles the product believes are hard, so it is defined in
+ * one place, `referenceAim`, and explained there.
  */
 
 import { maxCarry } from './clubs';
@@ -148,9 +150,12 @@ export function evaluateGrid(
 
   if (!best) throw new Error('Search grid contained no candidates');
 
-  const naivePoint =
-    category === 'tee' ? fairwayCenterAim(prepared, ball, bearing, reach) : { ...pin };
-  const naiveResult = evaluateAim(prepared, sit, profile, naivePoint, { normals });
+  const naivePoint = referenceAim(prepared, sit, profile, bearing);
+  const naiveCosts = new Float64Array(nSamples);
+  const naiveResult = evaluateAim(prepared, sit, profile, naivePoint, {
+    normals,
+    costs: naiveCosts,
+  });
 
   // The lattice can miss the best line (quantization, or a pin closer than
   // one cell). Adding the naive aim and the pin as candidates guarantees
@@ -179,7 +184,28 @@ export function evaluateGrid(
     };
   }
 
-  const optimalResult = evaluateAim(prepared, sit, profile, best.point, { normals });
+  const optimalCosts = new Float64Array(nSamples);
+  const optimalResult = evaluateAim(prepared, sit, profile, best.point, {
+    normals,
+    costs: optimalCosts,
+  });
+
+  // Paired standard error. The two aims saw the same landing draws, so the
+  // per-sample difference cancels most of the shared noise; taking the SE
+  // of the difference rather than combining two independent SEs is what
+  // makes the error bar tight enough to gate on.
+  let dSum = 0;
+  for (let i = 0; i < nSamples; i++) dSum += naiveCosts[i]! - optimalCosts[i]!;
+  const dMean = dSum / nSamples;
+  let dVar = 0;
+  for (let i = 0; i < nSamples; i++) {
+    const e = naiveCosts[i]! - optimalCosts[i]! - dMean;
+    dVar += e * e;
+  }
+  // The reported optimal is an argmin over the lattice, so `best` is the
+  // minimum of many noisy estimates and dMean is not exactly trapSize.
+  // The SPREAD is what is being measured here, and it is the same either way.
+  const trapSe = nSamples > 1 ? Math.sqrt(dVar / (nSamples - 1) / nSamples) : 0;
 
   return {
     origin: { x: minCol * cellSize, y: minRow * cellSize },
@@ -198,5 +224,44 @@ export function evaluateGrid(
       result: naiveResult,
     },
     trapSize: naiveResult.expectedStrokes - best.expectedStrokes,
+    trapSe,
   };
+}
+
+/**
+ * Where a player aims when they are not thinking about it.
+ *
+ * This is the yardstick every rating in the product is measured against,
+ * and it was wrong in both directions until Wave 1.
+ *
+ * It used to be "fairway centre at driver distance" for every `tee` puzzle
+ * regardless of the hole's length. On a 119-yard par 3 that scored the
+ * player against hitting driver 31 yards past the green — measured, the
+ * eight highest-rated puzzles in the library were all par-3 tee shots
+ * inflated this way, county-down-7 reading a trap of 1.151. Nobody needs to
+ * be taught not to hit driver at a wedge green.
+ *
+ * The obvious repair — "the reference is always the pin" — fails at the
+ * other end. When the pin is 453 yards away, aiming *at the flag* is not a
+ * naive behaviour, it is a degenerate use of the aim clamp: the shot
+ * becomes a driver fired down the flag line, and on a hole with water on
+ * that line it books a trap of 1.841 for a decision no player was making.
+ * Generating content against that yardstick would mass-produce a wrong
+ * lesson, so `optimize.test.ts` guards it explicitly.
+ *
+ * The rule that survives both: **aim at the flag if you can reach it,
+ * otherwise as far as you can down the middle.** That is what an
+ * unthinking player does, and it is the same sentence on a par 3, a 470-
+ * yard par 4 and a bunker shot.
+ */
+export function referenceAim(
+  prepared: PreparedHole,
+  sit: Situation,
+  profile: PlayerProfile,
+  bearing: number,
+): Pt {
+  const reach = maxCarry(profile, sit.lie);
+  const distToPin = dist(sit.ball, sit.pin);
+  if (distToPin <= reach) return { ...sit.pin };
+  return fairwayCenterAim(prepared, sit.ball, bearing, reach);
 }

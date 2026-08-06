@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clearsDecisionThreshold,
   eloDeltas,
   eloExpectedScore,
   puzzleRatingFromTrap,
   scoreBand,
 } from './scoring';
+import { DECISION_TRAP } from './constants';
 import { profileBucket } from './profile';
 
 describe('scoreBand', () => {
@@ -59,12 +61,32 @@ describe('puzzleRatingFromTrap', () => {
     expect(puzzleRatingFromTrap(-0.2)).toBe(1000);
   });
 
-  it('keeps resolution where most of the library lives', () => {
-    // The shipped library's median trap is ~0.05 and its bulk sits under
-    // 0.20; those must not all land on the same rating.
-    expect(puzzleRatingFromTrap(0.05)).toBe(1188);
-    expect(puzzleRatingFromTrap(0.1)).toBe(1333);
-    expect(puzzleRatingFromTrap(0.2)).toBe(1545);
+  it('anchors the base rating at the decision threshold, not at zero', () => {
+    // The curve used to start at trap 0, so it spent its first 333 points
+    // separating puzzles that both had no decision in them — trap 0.05
+    // rated 1188 while being, in the product's own terms, not worth asking.
+    expect(puzzleRatingFromTrap(DECISION_TRAP)).toBe(1000);
+    expect(puzzleRatingFromTrap(0.05)).toBe(1000);
+    expect(puzzleRatingFromTrap(0.099)).toBe(1000);
+  });
+
+  it('keeps resolution where servable puzzles actually live', () => {
+    // Above the threshold the spread must stay wide: these are the trap
+    // sizes the mined library is expected to produce.
+    expect(puzzleRatingFromTrap(0.2)).toBe(1333);
+    expect(puzzleRatingFromTrap(0.4)).toBe(1692);
+    expect(puzzleRatingFromTrap(0.8)).toBe(2000);
+  });
+
+  it('gates on the error bar, not the point estimate', () => {
+    // A trap of 0.12 measured to ±0.02 is a decision; the same 0.12
+    // measured to ±0.05 is a coin toss that happened to land high. The
+    // rating curve is steepest exactly where the estimate is noisiest, so
+    // the gate has to read the interval.
+    expect(clearsDecisionThreshold(0.12, 0.005)).toBe(true);
+    expect(clearsDecisionThreshold(0.12, 0.05)).toBe(false);
+    expect(clearsDecisionThreshold(0.09, 0)).toBe(false);
+    expect(clearsDecisionThreshold(DECISION_TRAP, 0)).toBe(true);
   });
 
   it('never saturates, so difficulty always orders', () => {

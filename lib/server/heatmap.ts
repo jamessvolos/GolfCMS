@@ -18,7 +18,7 @@ import type { PuzzleContent } from '@/lib/content/types';
  * when `brief` was added. The version rides in the bucket key, so old rows
  * are simply never read.
  */
-export const GRID_VERSION = 2;
+export const GRID_VERSION = 3;
 
 export interface HeatmapStore {
   get(puzzleId: string, bucket: string): Promise<GridSummary | null>;

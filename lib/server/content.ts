@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { db } from './db';
+import { clearsDecisionThreshold } from '@/lib/engine/scoring';
 import type { PuzzleContent } from '@/lib/content/types';
 import type { HoleData, PlayerProfile } from '@/lib/engine/types';
 
@@ -62,6 +63,9 @@ export async function updateProfile(input: z.infer<typeof profileInputSchema>): 
 export interface PuzzleRecord extends PuzzleContent {
   rating: number;
   trapSize: number;
+  trapSe: number;
+  /** Does this situation hold a decision once its error bar is allowed for? */
+  serves: boolean;
 }
 
 function parsePuzzleRow(row: {
@@ -74,6 +78,7 @@ function parsePuzzleRow(row: {
   description: string;
   rating: number;
   trapSize: number;
+  trapSe: number;
 }): PuzzleRecord {
   return {
     id: row.id,
@@ -85,6 +90,8 @@ function parsePuzzleRow(row: {
     description: row.description,
     rating: row.rating,
     trapSize: row.trapSize,
+    trapSe: row.trapSe,
+    serves: clearsDecisionThreshold(row.trapSize, row.trapSe),
   };
 }
 
