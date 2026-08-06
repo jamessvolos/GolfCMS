@@ -62,6 +62,9 @@ primary_region = "lhr"
   grace_period = "45s"
 
 [[vm]]
-  # Grid computation is single-threaded and CPU-bound; memory is modest.
+  # Measured rather than guessed: 264 MB peak while seeding 20 holes (the
+  # heaviest thing it does) and 181 MB steady-state serving. 512 MB leaves
+  # headroom and halves the memory line on the bill. Raise it if a much
+  # larger content library ever pushes seeding past this.
   size = "shared-cpu-1x"
-  memory = "1gb"
+  memory = "512mb"

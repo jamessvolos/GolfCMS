@@ -120,6 +120,29 @@ The alternatives, and why they lose:
 | **A VPS** | Most control and predictable cost, but you own the OS, TLS and updates for what is one `docker run`. |
 | **Vercel** | Does not work. The filesystem is ephemeral, so SQLite loses every attempt on each deploy. Move to Postgres first if this is the target. |
 
+### What it costs to run
+
+Measured on the shipped library, so the arithmetic can be redone against
+whatever the host charges today:
+
+| Resource | Actual usage |
+| --- | --- |
+| Memory, steady state | 181 MB serving |
+| Memory, peak | 264 MB while seeding 20 holes |
+| Disk | 1.4 MB of SQLite (the 1 GB volume is a platform minimum) |
+| Client payload | ~0.5 MB gzipped of JS across all chunks; a visit loads a subset |
+| Server egress | Small — HTML, JS and JSON only |
+
+The thing people expect to dominate does not: **map tiles never touch the
+server.** The browser fetches them from Esri directly, so imagery is not on
+your bandwidth bill and needs no key. `NEXT_PUBLIC_TILE_PROXY=1` would
+reverse that and route every tile through you — which is why it exists only
+for sandboxed development.
+
+The bill is therefore memory plus a suspended machine plus a 1 GB volume,
+and for personal use the machine is asleep almost all the time. Expect the
+host's plan minimum to exceed the actual usage.
+
 ### Restarts are cheap, first boot is not
 
 Seeding recomputes a Monte Carlo grid per puzzle, which is ~20 seconds for
