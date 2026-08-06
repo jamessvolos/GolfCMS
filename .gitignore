@@ -9,3 +9,7 @@ public/vendor/
 tsconfig.tsbuildinfo
 prisma/dev.db*
 lib/generated/
+
+# Raw Overpass responses. A build cache for `npm run mine`, not content —
+# the mined result in data/packs is what ships. Re-fetched on demand.
+data/osm-cache/

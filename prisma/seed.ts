@@ -6,7 +6,7 @@
  *   npm run db:seed
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { holeDataFromInput, ingestHole, ingestSchema } from '@/lib/server/ingestHole';
 import type { IngestInput } from '@/lib/server/ingestHole';
@@ -15,6 +15,7 @@ import { profileBucket, SEED_PROFILE } from '@/lib/engine/profile';
 import { db } from '@/lib/server/db';
 
 const CONTENT_DIR = join(process.cwd(), 'data', 'holes');
+const PACKS_DIR = join(process.cwd(), 'data', 'packs');
 const SEED_BUCKET = `v${GRID_VERSION}-${profileBucket(SEED_PROFILE)}`;
 
 /**
@@ -56,6 +57,25 @@ async function isCurrent(input: IngestInput): Promise<boolean> {
 /** SG_SEED_FORCE=1 re-ingests everything, ignoring the up-to-date check. */
 const force = process.env.SG_SEED_FORCE === '1';
 
+/**
+ * Mined content: `data/packs/*.json`, each an array of holes produced by
+ * `npm run mine`. Every puzzle in a pack arrives with the statistics the
+ * miner measured at full sampling, so ingesting one is a geometry check and
+ * a row write rather than a Monte Carlo grid — which is what keeps first
+ * boot affordable when the library is hundreds of situations rather than
+ * twenty hand-traced holes. The grid a player needs is computed for THEIR
+ * profile bucket on first play.
+ */
+function packHoles(): { name: string; input: unknown }[] {
+  if (!existsSync(PACKS_DIR)) return [];
+  const out: { name: string; input: unknown }[] = [];
+  for (const file of readdirSync(PACKS_DIR).filter((f) => f.endsWith('.json')).sort()) {
+    const holes = JSON.parse(readFileSync(join(PACKS_DIR, file), 'utf8')) as unknown[];
+    for (const [i, input] of holes.entries()) out.push({ name: `${file}#${i}`, input });
+  }
+  return out;
+}
+
 async function main() {
   await db.profile.upsert({ where: { id: 'local' }, create: { id: 'local' }, update: {} });
 
@@ -94,9 +114,43 @@ async function main() {
       process.exitCode = 1;
     }
   }
+  const packs = packHoles();
+  let packHoleCount = 0;
+  let packPuzzles = 0;
+  let packSkipped = 0;
+  for (const { name, input } of packs) {
+    const parsed = ingestSchema.safeParse(input);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      console.error(`✗ ${name}: ${issue?.path.join('.')} — ${issue?.message}`);
+      process.exitCode = 1;
+      continue;
+    }
+    try {
+      if (!force && (await isCurrent(parsed.data))) {
+        packPuzzles += parsed.data.puzzles.length;
+        packHoleCount++;
+        packSkipped++;
+        continue;
+      }
+      const result = await ingestHole(parsed.data);
+      packHoleCount++;
+      packPuzzles += result.puzzles.length;
+    } catch (err) {
+      console.error(`✗ ${name}: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  }
+  if (packs.length) {
+    console.log(
+      `✓ packs: ${packHoleCount} holes / ${packPuzzles} mined situations` +
+        (packSkipped ? ` — ${packSkipped} already current` : ''),
+    );
+  }
+
   console.log(
-    `\nseeded ${files.length} holes / ${puzzleCount} puzzles` +
-      (skipped ? ` — ${skipped} already current, left alone` : ''),
+    `\nseeded ${files.length + packHoleCount} holes / ${puzzleCount + packPuzzles} puzzles` +
+      (skipped + packSkipped ? ` — ${skipped + packSkipped} already current, left alone` : ''),
   );
 }
 

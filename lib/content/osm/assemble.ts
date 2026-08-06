@@ -159,13 +159,30 @@ function wayRing(way: OsmWay): [number, number][] | null {
   return close(way.geometry.map((g) => [g.lon, g.lat] as [number, number]));
 }
 
+/**
+ * How much bigger than a straight ribbon a buffered waterway may be before
+ * it is treated as a mapping artefact rather than a hazard.
+ *
+ * A buffer keeps only the OUTER ring, and a centreline that loops or
+ * doubles back therefore comes back as a filled blob with dry land inside
+ * it. Measured: the Beverley Brook at one mined course buffered to 94,661
+ * square yards — twenty times a ribbon of its length — and swallowed the
+ * whole hole, tee included. Fifty-two of sixty-five mined holes were
+ * refused at ingest for exactly this, all reported as "the ball is in
+ * water" with no hint of the cause.
+ *
+ * A ribbon's area is bounded by its length times its width plus the end
+ * caps. Three times that is generous for a meander and still an order of
+ * magnitude below a filled loop.
+ */
+const WATERWAY_FILL_TOLERANCE = 3;
+
 /** A waterway centreline widened into the strip of water it actually is. */
 function bufferedWaterway(way: OsmWay): [number, number][] | null {
   const half = waterwayHalfWidthYds(way.tags ?? {});
   if (half === null || !way.geometry || way.geometry.length < 2) return null;
-  const buffered = buffer(lineString(way.geometry.map((g) => [g.lon, g.lat])), half, {
-    units: 'yards',
-  });
+  const coords = way.geometry.map((g) => [g.lon, g.lat] as [number, number]);
+  const buffered = buffer(lineString(coords), half, { units: 'yards' });
   if (!buffered) return null;
   const geom = buffered.geometry;
   const ring =
@@ -176,7 +193,41 @@ function bufferedWaterway(way: OsmWay): [number, number][] | null {
         [...geom.coordinates].sort(
           (a, b) => ringAreaSqYds(b[0] as [number, number][]) - ringAreaSqYds(a[0] as [number, number][]),
         )[0]?.[0];
-  return ring ? close(ring as [number, number][]) : null;
+  if (!ring) return null;
+
+  const closed = close(ring as [number, number][]);
+  const lengthYds = lineLengthYds(coords);
+  const plausible = 2 * half * lengthYds + Math.PI * half * half;
+  if (ringAreaSqYds(closed) > WATERWAY_FILL_TOLERANCE * plausible) return null;
+  return closed;
+}
+
+/**
+ * Centreline length in yards, for the ribbon-area sanity check above. Same
+ * local equirectangular scale as `ringAreaSqYds`, so the two are comparable.
+ */
+function lineLengthYds(coords: [number, number][]): number {
+  const yPerDeg = 121740;
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) {
+    const [lon0, lat0] = coords[i - 1]!;
+    const [lon1, lat1] = coords[i]!;
+    const dy = (lat1 - lat0) * yPerDeg;
+    const dx = (lon1 - lon0) * yPerDeg * Math.cos((lat0 * Math.PI) / 180);
+    total += Math.hypot(dx, dy);
+  }
+  return total;
+}
+
+/**
+ * Only a multipolygon (or a boundary, which uses the same member scheme)
+ * describes an area. Every other relation type is a collection — a route, a
+ * network, a site — whose members are not rings and must not be stitched
+ * into one.
+ */
+function isAreaRelation(rel: OsmRelation): boolean {
+  const type = rel.tags?.type;
+  return type === 'multipolygon' || type === 'boundary';
 }
 
 function relationRings(rel: OsmRelation): { outer: [number, number][][]; inner: [number, number][][] } {
@@ -318,6 +369,19 @@ export function assembleHole(
     let holes: [number, number][][] = [];
     if (el.type === 'way') {
       outer = wayRing(el) ?? bufferedWaterway(el);
+    } else if (!isAreaRelation(el)) {
+      // A ROUTE relation is not a shape. `type=waterway` collects the
+      // segments of a river along its whole course — Beverley Brook is one
+      // relation of 53 member ways — and stitching those into a ring and
+      // filling it produces a lake with a golf course inside it. Measured:
+      // one such relation covered an entire hole, tee included, and 52 of
+      // 65 mined holes were refused at ingest for "the ball is in water".
+      //
+      // The member ways carry `waterway=river` themselves and are already
+      // in the response, where `bufferedWaterway` widens each into the
+      // strip of water it actually is. So skipping the relation loses
+      // nothing and is the only correct reading of it.
+      continue;
     } else {
       const rings = relationRings(el);
       // A multipolygon with several outers becomes several features; only

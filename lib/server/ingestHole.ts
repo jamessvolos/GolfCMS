@@ -73,6 +73,24 @@ export const ingestSchema = z.object({
         description: z.string().trim().min(1).max(200),
         /** Defaults to the hole pin. */
         pin: lonLat.optional(),
+        /**
+         * Measured by the miner at full sampling. When present the ingest
+         * trusts it rather than recomputing a grid per puzzle, which is
+         * what keeps first boot affordable once the library is mined
+         * content rather than twenty hand-traced holes. `content:audit`
+         * re-derives these from geometry, so a stale figure is a build
+         * failure rather than a silent lie.
+         */
+        stats: z
+          .object({
+            trapSize: z.number().min(0),
+            trapSe: z.number().min(0),
+            consequence: z.number().min(0),
+            asymmetry: z.number().min(0),
+            holds: z.enum(['decision', 'consequence']),
+            rating: z.number().int().min(0).max(4000),
+          })
+          .optional(),
       }),
     )
     .min(1)
@@ -293,8 +311,17 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       pin: prepared.toLocal(pin),
       lie: p.lie,
     };
-    const summary = computeGridSummary(prepared, sit, seedProfile, p.category);
-    const rating = puzzleRatingFromTrap(summary.trapSize);
+    // Mined content arrives already measured. Recomputing a grid per puzzle
+    // to rediscover a number the miner already published would put first
+    // boot in the minutes for a library of any size — and the grid a player
+    // actually needs is computed for THEIR profile bucket on first play
+    // anyway, not for the seed's.
+    const summary = p.stats ? null : computeGridSummary(prepared, sit, seedProfile, p.category);
+    const trapSize = p.stats?.trapSize ?? summary!.trapSize;
+    const trapSe = p.stats?.trapSe ?? summary!.trapSe;
+    const consequence = p.stats?.consequence ?? summary!.legibility.consequence;
+    const asymmetry = p.stats?.asymmetry ?? summary!.legibility.asymmetry;
+    const rating = p.stats?.rating ?? puzzleRatingFromTrap(trapSize);
 
     const data = {
       holeId: hole.id,
@@ -304,33 +331,35 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       category: p.category,
       description: p.description,
       rating,
-      trapSize: summary.trapSize,
-      trapSe: summary.trapSe,
-      consequence: summary.legibility.consequence,
-      asymmetry: summary.legibility.asymmetry,
+      trapSize,
+      trapSe,
+      consequence,
+      asymmetry,
       holds:
-        holdsSomething(
-          summary.trapSize,
-          summary.trapSe,
-          summary.legibility.asymmetry,
-          clearsDecisionThreshold,
-        ).because ?? '',
+        p.stats?.holds ??
+        holdsSomething(trapSize, trapSe, asymmetry, clearsDecisionThreshold).because ??
+        '',
     };
     await db.puzzle.upsert({ where: { id }, create: { id, ...data }, update: data });
 
-    // Geometry may have changed: replace every cached grid for this puzzle
-    // with a fresh one for the default bucket.
+    // Geometry may have changed: drop every cached grid for this puzzle.
+    // A hand-traced hole gets a warm one straight back, because there are
+    // twenty of them and a warm grid makes the first play instant. Mined
+    // content does not — it is computed on demand for the player's own
+    // bucket, which is the only grid that will actually be read.
     await db.heatmapCache.deleteMany({ where: { puzzleId: id } });
-    await db.heatmapCache.create({
-      data: {
-        puzzleId: id,
-        profileBucket: seedBucket,
-        grid: JSON.stringify(summary),
-        optimalAim: JSON.stringify(summary.optimal.lonlat),
-        optimalE: summary.optimal.e,
-      },
-    });
-    results.push({ id, rating, trapSize: summary.trapSize, trapSe: summary.trapSe });
+    if (summary) {
+      await db.heatmapCache.create({
+        data: {
+          puzzleId: id,
+          profileBucket: seedBucket,
+          grid: JSON.stringify(summary),
+          optimalAim: JSON.stringify(summary.optimal.lonlat),
+          optimalE: summary.optimal.e,
+        },
+      });
+    }
+    results.push({ id, rating, trapSize, trapSe });
   }
 
   // Re-annotation with a smaller puzzle set removes the orphans (and their
