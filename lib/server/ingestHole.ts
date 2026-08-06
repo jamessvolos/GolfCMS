@@ -16,6 +16,7 @@ import { clearsDecisionThreshold, puzzleRatingFromTrap } from '@/lib/engine/scor
 import { holdsSomething } from '@/lib/puzzle/legibility';
 import { computeGridSummary } from '@/lib/puzzle/gridSummary';
 import { GRID_VERSION } from './heatmap';
+import { prismaHeatmapStore } from './heatmapPrisma';
 import type {
   HoleData,
   HoleGeoJSON,
@@ -348,17 +349,9 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
     // content does not — it is computed on demand for the player's own
     // bucket, which is the only grid that will actually be read.
     await db.heatmapCache.deleteMany({ where: { puzzleId: id } });
-    if (summary) {
-      await db.heatmapCache.create({
-        data: {
-          puzzleId: id,
-          profileBucket: seedBucket,
-          grid: JSON.stringify(summary),
-          optimalAim: JSON.stringify(summary.optimal.lonlat),
-          optimalE: summary.optimal.e,
-        },
-      });
-    }
+    // Through the store, so the warm row is written in exactly the format
+    // the reader expects — contours dropped, field kept.
+    if (summary) await prismaHeatmapStore.put(id, seedBucket, summary);
     results.push({ id, rating, trapSize, trapSe });
   }
 

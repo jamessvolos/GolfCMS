@@ -93,3 +93,55 @@ describe('pickNext and situations with no decision in them', () => {
     expect(pick?.repeat).toBe(true);
   });
 });
+
+describe('pickNext at library scale', () => {
+  /** A mined library: hundreds of situations spread across the rating range. */
+  function library(n: number): QueueCandidate[] {
+    return Array.from({ length: n }, (_, i) =>
+      c(`p${String(i).padStart(4, '0')}`, 1000 + ((i * 37) % 1100), 0, null, i % 5 !== 0),
+    );
+  }
+
+  it('serves a full session of distinct puzzles without repeating', () => {
+    // The measurement the whole content programme exists to move. With 36
+    // puzzles the ±150 band exhausted in one sitting; 18 attempts were ever
+    // recorded against the shipped library.
+    const pool = library(600);
+    const seen: string[] = [];
+    for (let i = 0; i < 200; i++) {
+      const pick = pickNext(pool, 1200, { excludeIds: seen });
+      expect(pick).not.toBeNull();
+      expect(pick!.repeat).toBe(false);
+      seen.push(pick!.puzzleId);
+    }
+    expect(new Set(seen).size).toBe(200);
+  });
+
+  it('never serves a situation with nothing in it while real ones remain', () => {
+    const pool = library(600);
+    const flat = new Set(pool.filter((p) => !p.serves).map((p) => p.id));
+    const seen: string[] = [];
+    for (let i = 0; i < 150; i++) {
+      const pick = pickNext(pool, 1500, { excludeIds: seen })!;
+      expect(flat.has(pick.puzzleId)).toBe(false);
+      seen.push(pick.puzzleId);
+    }
+  });
+
+  it('stays inside the rating band while the band has content', () => {
+    const pool = library(600);
+    const seen: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const pick = pickNext(pool, 1400, { excludeIds: seen })!;
+      expect(pick.band).toBe(QUEUE_BAND);
+      seen.push(pick.puzzleId);
+    }
+  });
+
+  it('widens rather than failing when a band is genuinely empty', () => {
+    const pool = [c('lonely', 2400, 0, null, true)];
+    const pick = pickNext(pool, 1000);
+    expect(pick?.puzzleId).toBe('lonely');
+    expect(pick!.band).toBeGreaterThan(QUEUE_BAND);
+  });
+});

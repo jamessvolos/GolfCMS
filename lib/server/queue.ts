@@ -71,6 +71,9 @@ export function pickNext(
     }
     // Nothing unseen in band; if the band already covers the pool, review.
     if (inBand.length === pool.length) {
+      // With a mined library this is where a player lands only after
+      // exhausting everything at their level — so a review is a genuine
+      // spaced repetition rather than the app running out of content.
       const byAge = [...pool].sort(
         (a, b) =>
           (a.lastPlayedAt ?? 0) - (b.lastPlayedAt ?? 0) || near(a) - near(b) || a.id.localeCompare(b.id),

@@ -8,7 +8,7 @@
 
 import { contours as d3contours } from 'd3-contour';
 import { featureCollection, intersect } from '@turf/turf';
-import { maxCarry } from '@/lib/engine/clubs';
+import { searchRadius } from '@/lib/engine/optimize';
 import {
   GRID_BEYOND_PIN_MARGIN_YDS,
   GRID_MIN_REACH_YDS,
@@ -54,6 +54,13 @@ export function contoursFromGrid(
   profile: PlayerProfile,
   lie: PlayableLie,
   levels: number[] = DEFAULT_CONTOUR_LEVELS,
+  /**
+   * Search radius to clip to. Supplied when redrawing from a stored field,
+   * where the profile that computed the grid is not the one reading it —
+   * re-deriving the wedge there would clip a cached grid differently than
+   * the run that produced it.
+   */
+  maxROverride?: number,
 ): ContourSet {
   // Crop to the finite region to keep marching squares tight.
   let minCol = grid.width;
@@ -87,12 +94,7 @@ export function contoursFromGrid(
   const originY = grid.origin.y + minRow * grid.cellSize;
 
   // Same sector the optimizer searched, slightly inset for clipping.
-  const reach = maxCarry(profile, lie);
-  const distToPin = dist(ball, pin);
-  const maxR = Math.max(
-    GRID_MIN_REACH_YDS,
-    Math.min(reach * GRID_REACH_FACTOR, distToPin + GRID_BEYOND_PIN_MARGIN_YDS),
-  );
+  const maxR = maxROverride ?? searchRadius(ball, pin, profile, lie);
   const bearing = Math.atan2(pin.x - ball.x, pin.y - ball.y);
   const halfAngle = ((GRID_SECTOR_HALF_ANGLE_DEG - 1.5) * Math.PI) / 180;
   const rClip = maxR - grid.cellSize;

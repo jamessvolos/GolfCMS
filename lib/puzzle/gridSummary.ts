@@ -11,11 +11,13 @@
 import { maxCarry } from '@/lib/engine/clubs';
 import { dispersionParams } from '@/lib/engine/dispersion';
 import { evaluateAim } from '@/lib/engine/evaluate';
-import { evaluateGrid } from '@/lib/engine/optimize';
+import { evaluateGrid, searchRadius } from '@/lib/engine/optimize';
 import type { GridOptions } from '@/lib/engine/optimize';
 import type { Situation } from '@/lib/engine/evaluate';
 import { dist } from '@/lib/engine/projection';
 import { contoursFromGrid } from '@/lib/map/contours';
+import { encodeField } from './field';
+import type { EncodedField } from './field';
 import { legibility } from './legibility';
 import type { Legibility } from './legibility';
 import type { ContourSet } from '@/lib/map/contours';
@@ -56,6 +58,13 @@ export interface GridBrief {
 
 export interface GridSummary {
   contours: ContourSet;
+  /**
+   * The evaluated lattice itself, one byte per cell. Contours are a picture
+   * of this and cost ten times as much to store — see lib/puzzle/field.ts.
+   * Carried so the reveal can be read at any point, not only along the five
+   * lines the contour pass happened to draw.
+   */
+  field: EncodedField;
   optimal: { local: Pt; lonlat: LonLat; e: number; clubLabel: string; result: EvalResult };
   /** The naive line's full result, forwarded rather than discarded. */
   naive: { local: Pt; lonlat: LonLat; e: number; result: EvalResult };
@@ -184,6 +193,11 @@ export function computeGridSummary(
 
   return {
     contours,
+    field: encodeField(grid, {
+      ball: sit.ball,
+      pin: sit.pin,
+      maxR: searchRadius(sit.ball, sit.pin, profile, sit.lie),
+    }),
     optimal: {
       local: grid.optimal.point,
       lonlat: prepared.toLonLat(grid.optimal.point),

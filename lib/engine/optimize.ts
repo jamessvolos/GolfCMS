@@ -31,6 +31,7 @@ import { dist } from './projection';
 import { createNormalPairs } from './rng';
 import type {
   EvalGrid,
+  PlayableLie,
   PlayerProfile,
   PreparedHole,
   Pt,
@@ -112,10 +113,7 @@ export function evaluateGrid(
 
   const reach = maxCarry(profile, lie);
   const distToPin = dist(ball, pin);
-  const maxR = Math.max(
-    GRID_MIN_REACH_YDS,
-    Math.min(reach * GRID_REACH_FACTOR, distToPin + GRID_BEYOND_PIN_MARGIN_YDS),
-  );
+  const maxR = searchRadius(ball, pin, profile, lie);
   const bearing = Math.atan2(pin.x - ball.x, pin.y - ball.y);
   const halfAngle = (GRID_SECTOR_HALF_ANGLE_DEG * Math.PI) / 180;
 
@@ -264,4 +262,26 @@ export function referenceAim(
   const distToPin = dist(sit.ball, sit.pin);
   if (distToPin <= reach) return { ...sit.pin };
   return fairwayCenterAim(prepared, sit.ball, bearing, reach);
+}
+
+
+/**
+ * The radius the candidate grid searches, and therefore the radius the
+ * contour clip and the stored field must agree on. Defined once: three
+ * copies of this rule is three chances for a cached grid to be drawn with a
+ * different edge than the one it was computed with.
+ */
+export function searchRadius(
+  ball: Pt,
+  pin: Pt,
+  profile: PlayerProfile,
+  lie: PlayableLie,
+): number {
+  return Math.max(
+    GRID_MIN_REACH_YDS,
+    Math.min(
+      maxCarry(profile, lie) * GRID_REACH_FACTOR,
+      dist(ball, pin) + GRID_BEYOND_PIN_MARGIN_YDS,
+    ),
+  );
 }
