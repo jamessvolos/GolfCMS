@@ -21,6 +21,7 @@ import { bucketedProfile, SEED_PROFILE } from '@/lib/engine/profile';
 import { dist } from '@/lib/engine/projection';
 import { clearsDecisionThreshold, puzzleRatingFromTrap } from '@/lib/engine/scoring';
 import { computeGridSummary } from '@/lib/puzzle/gridSummary';
+import { holdsSomething } from '@/lib/puzzle/legibility';
 import { holeDataFromInput, ingestSchema } from '@/lib/server/ingestHole';
 import type { PlayableLie, PuzzleCategory } from '@/lib/engine/types';
 
@@ -42,6 +43,10 @@ export interface DriftRow {
   trap: number;
   trapSe: number;
   rating: number;
+  consequence: number;
+  asymmetry: number;
+  /** '', 'decision' or 'consequence'. */
+  holds: string;
   serves: boolean;
 }
 
@@ -62,6 +67,12 @@ export function measureLibrary(): DriftRow[] {
         puzzle.category,
         { nSamples },
       );
+      const held = holdsSomething(
+        summary.trapSize,
+        summary.trapSe,
+        summary.legibility.asymmetry,
+        clearsDecisionThreshold,
+      );
       const referenceIsPin =
         Math.abs(summary.naive.local.x - pin.x) < 1e-9 &&
         Math.abs(summary.naive.local.y - pin.y) < 1e-9;
@@ -78,7 +89,10 @@ export function measureLibrary(): DriftRow[] {
         trap: summary.trapSize,
         trapSe: summary.trapSe,
         rating: puzzleRatingFromTrap(summary.trapSize),
-        serves: clearsDecisionThreshold(summary.trapSize, summary.trapSe),
+        consequence: summary.legibility.consequence,
+        asymmetry: summary.legibility.asymmetry,
+        holds: held.because ?? '',
+        serves: held.ships,
       });
     }
   }
@@ -95,22 +109,25 @@ function main(): void {
   rows.sort((a, b) => b.trap - a.trap);
   console.log(`\nRating drift — ${rows.length} shipped puzzles at n=${nSamples}\n`);
   console.log(
-    'puzzle                        par   toPin   ref     trap    ±SE   rating  serves',
+    'puzzle                             par   toPin   ref     trap    ±SE   rating  asym   holds',
   );
   for (const r of rows) {
     console.log(
-      `${r.puzzleId.padEnd(28)} ${String(r.par).padStart(3)}  ` +
+      `${r.puzzleId.padEnd(35)} ${String(r.par).padStart(3)}  ` +
         `${String(r.toPin).padStart(5)}y  ${(r.referenceIsPin ? 'pin' : `${r.referenceYds}y`).padStart(5)}  ` +
         `${r.trap.toFixed(3).padStart(6)}  ${r.trapSe.toFixed(3)}   ` +
-        `${String(r.rating).padStart(5)}  ${r.serves ? 'yes' : ' — '}`,
+        `${String(r.rating).padStart(5)}  ${r.asymmetry.toFixed(2)}   ${r.holds || '—'}`,
     );
   }
 
   const serving = rows.filter((r) => r.serves);
   const ses = rows.map((r) => r.trapSe).sort((a, b) => a - b);
+  const decisions = rows.filter((r) => r.holds === 'decision').length;
+  const consequences = rows.filter((r) => r.holds === 'consequence').length;
   console.log(
-    `\n${serving.length} of ${rows.length} clear the gate ` +
-      `(trap − 2·SE ≥ ${DECISION_TRAP.toFixed(2)}).`,
+    `\n${serving.length} of ${rows.length} hold something — ` +
+      `${decisions} a decision (trap − 2·SE ≥ ${DECISION_TRAP.toFixed(2)}), ` +
+      `${consequences} a one-sided consequence.`,
   );
   console.log(
     `SE range ${ses[0]!.toFixed(3)}–${ses[ses.length - 1]!.toFixed(3)}, ` +

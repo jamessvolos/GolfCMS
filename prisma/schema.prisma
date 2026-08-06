@@ -60,6 +60,13 @@ model Puzzle {
   /// is how far it can be trusted, and the serving gate reads
   /// trapSize - 2*trapSe rather than the point estimate.
   trapSe       Float     @default(0)
+  /// Strokes lost by the worst miss within 36y of the optimal aim.
+  consequence  Float     @default(0)
+  /// How much more the bad side costs than the safe side. This, not raw
+  /// consequence, is what makes "which way do you miss?" answerable.
+  asymmetry    Float     @default(0)
+  /// Why this situation is worth a turn: "decision", "consequence", or "".
+  holds        String    @default("")
   hole         Hole      @relation(fields: [holeId], references: [id])
   attempts     Attempt[]
   heatmaps     HeatmapCache[]

@@ -6,6 +6,7 @@
 
 import { db } from './db';
 import { clearsDecisionThreshold } from '@/lib/engine/scoring';
+import { holdsSomething } from '@/lib/puzzle/legibility';
 
 export const QUEUE_BAND = 150;
 /** Widen the band by this much per pass when nothing is in range. */
@@ -93,6 +94,7 @@ export async function nextPuzzleId(
       rating: true,
       trapSize: true,
       trapSe: true,
+      asymmetry: true,
       attempts: {
         where: { profileId },
         select: { createdAt: true },
@@ -107,7 +109,7 @@ export async function nextPuzzleId(
     rating: p.rating,
     attempts: p._count.attempts,
     lastPlayedAt: p.attempts[0]?.createdAt.getTime() ?? null,
-    serves: clearsDecisionThreshold(p.trapSize, p.trapSe),
+    serves: holdsSomething(p.trapSize, p.trapSe, p.asymmetry, clearsDecisionThreshold).ships,
   }));
   return pickNext(candidates, playerRating, { excludeIds });
 }

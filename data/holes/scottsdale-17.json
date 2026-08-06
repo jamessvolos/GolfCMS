@@ -921,6 +921,20 @@
       "lie": "tee",
       "category": "tee",
       "description": "Driver at the green with water long-left, or a 6-iron and a wedge?"
+    },
+    {
+      "id": "scottsdale-17-bunker-pin-left",
+      "ball": {
+        "lon": -111.910891,
+        "lat": 33.6370271
+      },
+      "lie": "sand",
+      "category": "recovery",
+      "description": "Centre-line fairway bunker: how much of the water do you take on? — flag left.",
+      "pin": {
+        "lon": -111.910015888448,
+        "lat": 33.63702657712642
+      }
     }
   ]
 }

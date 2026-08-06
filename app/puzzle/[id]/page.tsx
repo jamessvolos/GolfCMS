@@ -29,7 +29,11 @@ export default async function PuzzlePage({ params }: { params: Promise<{ id: str
           </div>
           <span className="mono-nums text-[12px] text-ink-soft">
             {puzzle.lie.toUpperCase()} LIE · PUZZLE {puzzle.rating}
-            {puzzle.serves ? ` ±${ratingUncertainty(puzzle.trapSize, puzzle.trapSe)}` : ' · NO DECISION'}
+            {puzzle.holds === 'decision'
+              ? ` ±${ratingUncertainty(puzzle.trapSize, puzzle.trapSe)}`
+              : puzzle.holds === 'consequence'
+                ? ` · MISS COSTS ${puzzle.asymmetry.toFixed(1)}`
+                : ' · NO DECISION'}
           </span>
         </div>
         <h1 className="mt-1 font-display text-[clamp(24px,4.5vw,34px)] leading-tight">

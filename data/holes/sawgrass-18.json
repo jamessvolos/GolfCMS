@@ -860,6 +860,34 @@
       "lie": "tee",
       "category": "tee",
       "description": "Water all the way down the left — how much do you take on?"
+    },
+    {
+      "id": "sawgrass-18-approach-2-pin-front",
+      "ball": {
+        "lon": -81.392714,
+        "lat": 30.196759
+      },
+      "lie": "fairway",
+      "category": "approach",
+      "description": "About 170 in from the right half of the fairway. The lake hugs the entire left side of this green — flag hunt or fat side right? — flag front.",
+      "pin": {
+        "lon": -81.39383427208462,
+        "lat": 30.197593451895937
+      }
+    },
+    {
+      "id": "sawgrass-18-recovery-3-pin-front-left",
+      "ball": {
+        "lon": -81.392705,
+        "lat": 30.197251
+      },
+      "lie": "recovery",
+      "category": "recovery",
+      "description": "Punch out or thread it? From the trees right, about 140 to a pin guarded by water long and left — flag front left.",
+      "pin": {
+        "lon": -81.39393677062293,
+        "lat": 30.197600675035016
+      }
     }
   ]
 }

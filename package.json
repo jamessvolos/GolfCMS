@@ -24,6 +24,7 @@
     "content:audit": "tsx scripts/audit-content.ts",
     "content:positions": "tsx scripts/position-sweep.ts",
     "content:drift": "tsx scripts/rating-drift.ts",
+    "content:pins": "tsx scripts/pin-sweep.ts",
     "explain:golden": "tsx scripts/explain-golden.ts"
   },
   "repository": {

@@ -16,6 +16,8 @@ import type { GridOptions } from '@/lib/engine/optimize';
 import type { Situation } from '@/lib/engine/evaluate';
 import { dist } from '@/lib/engine/projection';
 import { contoursFromGrid } from '@/lib/map/contours';
+import { legibility } from './legibility';
+import type { Legibility } from './legibility';
 import type { ContourSet } from '@/lib/map/contours';
 import type {
   EvalGrid,
@@ -62,6 +64,12 @@ export interface GridSummary {
   trapSize: number;
   /** Standard error of trapSize; see EvalGrid.trapSe. */
   trapSe: number;
+  /**
+   * The second rating axis. trapSize asks whether the obvious aim is wrong;
+   * legibility asks what being wrong costs, and names the feature the
+   * obvious line feeds. A situation ships if it holds either.
+   */
+  legibility: Legibility;
   brief: GridBrief;
 }
 
@@ -192,6 +200,7 @@ export function computeGridSummary(
     pinAim,
     trapSize: grid.trapSize,
     trapSe: grid.trapSe,
+    legibility: legibility(grid, sit.ball),
     brief: buildBrief(grid, sit, profile),
   };
 }

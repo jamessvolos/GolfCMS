@@ -583,6 +583,20 @@
       "lie": "fairway",
       "category": "approach",
       "description": "From the drop zone — the pin is not always the play"
+    },
+    {
+      "id": "sawgrass-17-approach-1-pin-front-left",
+      "ball": {
+        "lon": -81.3902795,
+        "lat": 30.1935997
+      },
+      "lie": "tee",
+      "category": "approach",
+      "description": "137y, all carry, island green — where do you aim? — flag front left.",
+      "pin": {
+        "lon": -81.39089147789747,
+        "lat": 30.194552892259047
+      }
     }
   ]
 }

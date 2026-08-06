@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { db } from './db';
 import { clearsDecisionThreshold } from '@/lib/engine/scoring';
+import { holdsSomething } from '@/lib/puzzle/legibility';
 import type { PuzzleContent } from '@/lib/content/types';
 import type { HoleData, PlayerProfile } from '@/lib/engine/types';
 
@@ -64,7 +65,11 @@ export interface PuzzleRecord extends PuzzleContent {
   rating: number;
   trapSize: number;
   trapSe: number;
-  /** Does this situation hold a decision once its error bar is allowed for? */
+  consequence: number;
+  asymmetry: number;
+  /** Why this situation is worth a turn: 'decision', 'consequence', or ''. */
+  holds: string;
+  /** Does it hold either? */
   serves: boolean;
 }
 
@@ -79,6 +84,9 @@ function parsePuzzleRow(row: {
   rating: number;
   trapSize: number;
   trapSe: number;
+  consequence: number;
+  asymmetry: number;
+  holds: string;
 }): PuzzleRecord {
   return {
     id: row.id,
@@ -91,7 +99,11 @@ function parsePuzzleRow(row: {
     rating: row.rating,
     trapSize: row.trapSize,
     trapSe: row.trapSe,
-    serves: clearsDecisionThreshold(row.trapSize, row.trapSe),
+    consequence: row.consequence,
+    asymmetry: row.asymmetry,
+    holds: row.holds,
+    serves: holdsSomething(row.trapSize, row.trapSe, row.asymmetry, clearsDecisionThreshold)
+      .ships,
   };
 }
 

@@ -751,6 +751,20 @@
       "lie": "tee",
       "category": "tee",
       "description": "Bay Hill's closing tee shot. Everything dangerous is down the left: a huge bunker at the turn, then the lake in front of the green. Position beats power."
+    },
+    {
+      "id": "bayhill-18-approach-2-pin-left",
+      "ball": {
+        "lon": -81.5105418,
+        "lat": 28.4655557
+      },
+      "lie": "fairway",
+      "category": "approach",
+      "description": "The lake eats anything soft — where is your miss? — flag left.",
+      "pin": {
+        "lon": -81.5104562495372,
+        "lat": 28.4640970538444
+      }
     }
   ]
 }

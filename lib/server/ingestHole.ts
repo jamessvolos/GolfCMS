@@ -12,7 +12,8 @@ import { CLASSIFY_PRIORITY } from '@/lib/engine/constants';
 import { classifyPoint, prepareHole } from '@/lib/engine/hole';
 import { bucketedProfile, profileBucket, SEED_PROFILE } from '@/lib/engine/profile';
 import { dist } from '@/lib/engine/projection';
-import { puzzleRatingFromTrap } from '@/lib/engine/scoring';
+import { clearsDecisionThreshold, puzzleRatingFromTrap } from '@/lib/engine/scoring';
+import { holdsSomething } from '@/lib/puzzle/legibility';
 import { computeGridSummary } from '@/lib/puzzle/gridSummary';
 import { GRID_VERSION } from './heatmap';
 import type {
@@ -75,7 +76,11 @@ export const ingestSchema = z.object({
       }),
     )
     .min(1)
-    .max(4),
+    // A hand-traced hole never had more than four puzzles, and the cap was
+    // there to catch an authoring slip. A pin sheet legitimately produces
+    // several situations from the same ball position, so the ceiling is now
+    // "more than a round's worth of shots on one hole is a mistake".
+    .max(16),
 });
 
 export type IngestInput = z.infer<typeof ingestSchema>;
@@ -301,6 +306,15 @@ export async function ingestHole(input: IngestInput): Promise<IngestResult> {
       rating,
       trapSize: summary.trapSize,
       trapSe: summary.trapSe,
+      consequence: summary.legibility.consequence,
+      asymmetry: summary.legibility.asymmetry,
+      holds:
+        holdsSomething(
+          summary.trapSize,
+          summary.trapSe,
+          summary.legibility.asymmetry,
+          clearsDecisionThreshold,
+        ).because ?? '',
     };
     await db.puzzle.upsert({ where: { id }, create: { id, ...data }, update: data });
 

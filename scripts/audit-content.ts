@@ -128,12 +128,15 @@ if (!process.argv.includes('--no-decisions')) {
   const serving = rows.filter((r) => r.serves);
   const ses = rows.map((r) => r.trapSe).sort((a, b) => a - b);
   console.log(
-    `\nDecision census — ${serving.length} of ${rows.length} puzzles hold a decision ` +
-      `(trap − 2·SE ≥ ${DECISION_TRAP.toFixed(2)}); SE median ${ses[ses.length >> 1]!.toFixed(3)} strokes.`,
+    `\nDecision census — ${serving.length} of ${rows.length} puzzles hold something: ` +
+      `${rows.filter((r) => r.holds === 'decision').length} a decision ` +
+      `(trap − 2·SE ≥ ${DECISION_TRAP.toFixed(2)}), ` +
+      `${rows.filter((r) => r.holds === 'consequence').length} a one-sided consequence. ` +
+      `SE median ${ses[ses.length >> 1]!.toFixed(3)} strokes.`,
   );
-  for (const r of serving.sort((a, b) => b.trap - a.trap)) {
+  for (const r of serving.sort((a, b) => b.trap - a.trap || b.asymmetry - a.asymmetry)) {
     console.log(
-      `    ✓ ${r.puzzleId.padEnd(26)} trap ${r.trap.toFixed(3)} ± ${r.trapSe.toFixed(3)}  rating ${r.rating}`,
+      `    ✓ ${r.puzzleId.padEnd(38)} ${r.holds.padEnd(11)} trap ${r.trap.toFixed(3)} ± ${r.trapSe.toFixed(3)}  asym ${r.asymmetry.toFixed(2)}  rating ${r.rating}`,
     );
   }
 }

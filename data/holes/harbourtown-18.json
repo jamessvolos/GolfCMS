@@ -845,6 +845,20 @@
       "lie": "tee",
       "category": "tee",
       "description": "How much marsh can your dispersion carry?"
+    },
+    {
+      "id": "harbourtown-18-approach-2-pin-back-left",
+      "ball": {
+        "lon": -80.8139221,
+        "lat": 32.1356196
+      },
+      "lie": "fairway",
+      "category": "approach",
+      "description": "Bail right and the lighthouse watches you chip — flag back left.",
+      "pin": {
+        "lon": -80.8135716718296,
+        "lat": 32.13705851149412
+      }
     }
   ]
 }

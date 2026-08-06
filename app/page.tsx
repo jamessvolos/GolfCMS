@@ -114,13 +114,17 @@ export default async function Home() {
                           {puzzle.description}
                         </span>
                         <span className="mono-nums text-[11.5px] text-ink-soft">
-                          {puzzle.serves ? (
+                          {puzzle.holds === 'decision' ? (
                             <>
                               rating {puzzle.rating} ±
                               {ratingUncertainty(puzzle.trapSize, puzzle.trapSe)}
                             </>
+                          ) : puzzle.holds === 'consequence' ? (
+                            <span title="The flag is the right aim here — but one side of the miss costs far more than the other.">
+                              miss costs {puzzle.asymmetry.toFixed(1)}
+                            </span>
                           ) : (
-                            <span title="Aiming at the flag is already optimal here — there is no decision to score.">
+                            <span title="Aiming at the flag is already optimal here, and both misses cost the same — there is nothing to decide.">
                               no decision
                             </span>
                           )}
