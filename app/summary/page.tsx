@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getProgress } from '@/lib/server/progress';
 import Sparkline from '@/components/progress/Sparkline';
+import { AIM_DECISIONS_PER_ROUND, ledgerHeadline } from '@/lib/progress/ledger';
 import TallyStreak from '@/components/progress/TallyStreak';
 import { bandStamp } from '@/lib/design/tokens';
 import type { Band } from '@/lib/progress/xp';
@@ -24,6 +25,8 @@ export default async function SummaryPage() {
     : 0;
   const sessionElo = session.reduce((s, a) => s + a.eloDelta, 0);
   const sessionXp = session.reduce((s, a) => s + a.xpGained, 0);
+  const ledger = p.ledger;
+  const ledgerLine = ledgerHeadline(ledger);
 
   return (
     <main className="mx-auto max-w-3xl px-5 py-12">
@@ -55,6 +58,20 @@ export default async function SummaryPage() {
         </section>
       ) : (
         <>
+          {ledgerLine ? (
+            <section className="mt-6 border-l-2 border-[var(--sg-brass)] pl-4">
+              <div className="stat-caption">The ledger</div>
+              <p className="mt-1 font-display text-[clamp(19px,3.4vw,26px)] leading-snug [text-wrap:balance]">
+                {ledgerLine}
+              </p>
+              <p className="mono-nums mt-2 text-[11.5px] text-ink-soft">
+                mean {ledger.meanLoss.toFixed(3)} strokes per aim decision ×{' '}
+                {AIM_DECISIONS_PER_ROUND} decisions a round · rating is for pacing the queue,
+                this is the number that is yours
+              </p>
+            </section>
+          ) : null}
+
           <section className="mt-6 grid gap-6 sm:grid-cols-2">
             <div>
               <div className="stat-caption">Rating</div>

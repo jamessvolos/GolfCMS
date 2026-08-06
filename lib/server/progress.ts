@@ -5,6 +5,8 @@
 
 import { db } from './db';
 import { levelInfo, tallyGroups } from '@/lib/progress/xp';
+import { buildLedger } from '@/lib/progress/ledger';
+import type { Ledger } from '@/lib/progress/ledger';
 import type { Band } from '@/lib/progress/xp';
 import type { PuzzleCategory } from '@/lib/engine/types';
 
@@ -47,6 +49,11 @@ export interface ProgressSummary {
   recent: SessionAttempt[];
   /** Attempts from the current session (the latest unbroken run of play). */
   session: SessionAttempt[];
+  /**
+   * Strokes conceded per round, from the sgLoss already stored on every
+   * attempt. Elo paces the queue; this is the number a golfer owns.
+   */
+  ledger: Ledger;
 }
 
 const CATEGORIES: PuzzleCategory[] = ['tee', 'approach', 'layup', 'recovery'];
@@ -114,6 +121,7 @@ export async function getProgress(profileId = 'local'): Promise<ProgressSummary>
       tally: tallyGroups(streak),
     },
     level: levelInfo(xp),
+    ledger: buildLedger(attempts.map((a) => ({ sgLoss: a.sgLoss, createdAt: a.createdAt }))),
     totals: {
       attempts: attempts.length,
       // Clamp per-attempt: a negative sgLoss is Monte Carlo noise around a

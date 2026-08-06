@@ -26,6 +26,7 @@
     "content:drift": "tsx scripts/rating-drift.ts",
     "content:pins": "tsx scripts/pin-sweep.ts",
     "mine": "tsx scripts/mine.ts",
+    "round:measure": "tsx scripts/round-measure.ts",
     "explain:golden": "tsx scripts/explain-golden.ts"
   },
   "repository": {
