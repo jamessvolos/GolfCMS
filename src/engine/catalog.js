@@ -4,29 +4,40 @@
 // is the caller's concern.
 
 import { makePuzzle, DIFFICULTIES } from './puzzle.js';
+import { BIOMES } from './generate.js';
 
 // Crockford-style base32: no I, L, O, U — codes survive handwriting.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+const BIOME_LETTERS = 'CWAL'; // classic, winter, alpine, links
 
 export const STATUSES = ['generated', 'approved', 'rejected'];
 
-/** Encode a 32-bit seed + difficulty into a code like GLF-3K9M-W2P0-S. */
-export function encodeShareCode(seed, difficulty) {
+/**
+ * Encode seed + difficulty (+ biome) into a code like GLF-3K9M-W2P0-S.
+ * Classic codes keep the original three-part format so every code ever
+ * shared stays valid; other biomes append a letter: GLF-3K9M-W2P0-S-W.
+ */
+export function encodeShareCode(seed, difficulty, biome = 'classic') {
   const di = DIFFICULTIES.indexOf(difficulty);
   if (di < 0) throw new Error(`unknown difficulty: ${difficulty}`);
+  const bi = BIOMES.indexOf(biome);
+  if (bi < 0) throw new Error(`unknown biome: ${biome}`);
   let n = seed >>> 0;
   let chars = '';
   for (let i = 0; i < 7; i++) {
     chars = ALPHABET[n & 31] + chars;
     n >>>= 5;
   }
-  chars += ALPHABET[(seed >>> 0) % 31 ^ di]; // check digit folds in difficulty
-  return `GLF-${chars.slice(0, 4)}-${chars.slice(4)}-${'ESR'[di]}`;
+  // Check digit folds in difficulty and biome (biome 0 preserves old codes).
+  chars += ALPHABET[(seed >>> 0) % 31 ^ di ^ (bi << 2)];
+  const base = `GLF-${chars.slice(0, 4)}-${chars.slice(4)}-${'ESR'[di]}`;
+  return bi === 0 ? base : `${base}-${BIOME_LETTERS[bi]}`;
 }
 
-/** @returns {{seed: number, difficulty: string}} */
+/** @returns {{seed: number, difficulty: string, biome: string}} */
 export function decodeShareCode(code) {
-  const m = String(code).trim().toUpperCase().match(/^GLF-([0-9A-Z]{4})-([0-9A-Z]{4})-([ESR])$/);
+  const m = String(code).trim().toUpperCase()
+    .match(/^GLF-([0-9A-Z]{4})-([0-9A-Z]{4})-([ESR])(?:-([CWAL]))?$/);
   if (!m) throw new Error('malformed share code');
   const chars = m[1] + m[2];
   let seed = 0;
@@ -36,9 +47,11 @@ export function decodeShareCode(code) {
     seed = ((seed << 5) | v) >>> 0;
   }
   const di = 'ESR'.indexOf(m[3]);
-  const check = ALPHABET[(seed >>> 0) % 31 ^ di];
+  const bi = m[4] ? BIOME_LETTERS.indexOf(m[4]) : 0;
+  if (bi >= BIOMES.length) throw new Error('unknown biome in share code');
+  const check = ALPHABET[(seed >>> 0) % 31 ^ di ^ (bi << 2)];
   if (chars[7] !== check) throw new Error('share code failed its check digit');
-  return { seed, difficulty: DIFFICULTIES[di] };
+  return { seed, difficulty: DIFFICULTIES[di], biome: BIOMES[bi] };
 }
 
 /**
@@ -46,12 +59,13 @@ export function decodeShareCode(code) {
  * @returns {{code: string, seed: number, difficulty: string, par: number,
  *            archetype: string, start: {x:number,y:number}, status: string, notes: string}}
  */
-export function makeRecord(seed, difficulty = 'standard') {
-  const p = makePuzzle(seed, difficulty);
+export function makeRecord(seed, difficulty = 'standard', biome = 'classic') {
+  const p = makePuzzle(seed, difficulty, biome);
   return {
-    code: encodeShareCode(p.seed, p.difficulty),
+    code: encodeShareCode(p.seed, p.difficulty, p.biome),
     seed: p.seed,
     difficulty: p.difficulty,
+    biome: p.biome,
     par: p.par,
     archetype: p.course.archetype,
     start: p.start,
@@ -67,12 +81,12 @@ export function setStatus(record, status) {
 }
 
 /** Batch-generate distinct certified records from a base seed. */
-export function generateBatch(baseSeed, count, difficulty = 'standard') {
+export function generateBatch(baseSeed, count, difficulty = 'standard', biome = 'classic') {
   const records = [];
   const seen = new Set();
   let seed = baseSeed >>> 0;
   while (records.length < count) {
-    const r = makeRecord(seed, difficulty);
+    const r = makeRecord(seed, difficulty, biome);
     seed = (r.seed + 1) >>> 0; // makePuzzle may have rerolled forward
     if (!seen.has(r.seed)) {
       seen.add(r.seed);

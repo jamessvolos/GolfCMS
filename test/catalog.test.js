@@ -12,7 +12,7 @@ test('share codes round-trip across seeds and difficulties', () => {
     for (const difficulty of DIFFICULTIES) {
       const code = encodeShareCode(seed, difficulty);
       assert.match(code, /^GLF-[0-9A-Z]{4}-[0-9A-Z]{4}-[ESR]$/);
-      assert.deepEqual(decodeShareCode(code), { seed, difficulty });
+      assert.deepEqual(decodeShareCode(code), { seed, difficulty, biome: 'classic' });
     }
   }
 });
@@ -22,6 +22,7 @@ test('share codes are case-insensitive and whitespace-tolerant on redeem', () =>
   assert.deepEqual(decodeShareCode('  ' + code.toLowerCase() + ' '), {
     seed: 1837462913,
     difficulty: 'rude',
+    biome: 'classic',
   });
 });
 

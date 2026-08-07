@@ -15,9 +15,9 @@ import { resolveShot } from './shots.js';
  * }} Game
  */
 
-/** @param {number} seed @param {{x:number,y:number}} [ballStart] @returns {Game} */
-export function createGame(seed, ballStart) {
-  const course = generateCourse(seed);
+/** @param {number} seed @param {{x:number,y:number}} [ballStart] @param {string} [biome] @returns {Game} */
+export function createGame(seed, ballStart, biome = 'classic') {
+  const course = generateCourse(seed, biome);
   const start = ballStart ? { ...ballStart } : { ...course.tee };
   return {
     course,
@@ -45,7 +45,7 @@ export function applyShot(game, shot) {
 /** Rewind one shot by replaying the rest of history from the start. */
 export function undoShot(game) {
   if (game.history.length === 0) return game;
-  let g = createGame(game.course.seed, game.start);
+  let g = createGame(game.course.seed, game.start, game.course.biome);
   for (const entry of game.history.slice(0, -1)) g = applyShot(g, entry.shot);
   return g;
 }

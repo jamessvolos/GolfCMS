@@ -2,6 +2,7 @@
 // The engine is imported, never duplicated — the page is a thin interpreter.
 
 import { makePuzzle, dailyPuzzle, dailyNumber, DIFFICULTIES } from '../engine/puzzle.js';
+import { BIOMES } from '../engine/generate.js';
 import { createGame, applyShot, undoShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
@@ -34,10 +35,11 @@ let recorded = false;
 
 function loadFromHash() {
   const h = location.hash;
-  const holeMatch = h.match(/^#\/hole\/(\d+)(?:\/(\w+))?/);
+  const holeMatch = h.match(/^#\/hole\/(\d+)(?:\/(\w+))?(?:\/(\w+))?/);
   if (holeMatch) {
     const difficulty = DIFFICULTIES.includes(holeMatch[2]) ? holeMatch[2] : 'standard';
-    startPuzzle(makePuzzle(Number(holeMatch[1]) >>> 0, difficulty), false);
+    const biome = BIOMES.includes(holeMatch[3]) ? holeMatch[3] : 'classic';
+    startPuzzle(makePuzzle(Number(holeMatch[1]) >>> 0, difficulty, biome), false);
   } else {
     startPuzzle(dailyPuzzle(), true);
   }
@@ -46,15 +48,16 @@ function loadFromHash() {
 function startPuzzle(p, daily) {
   puzzle = p;
   isDaily = daily;
-  game = createGame(p.seed, p.start);
+  game = createGame(p.seed, p.start, p.biome);
   aim = null;
   recorded = false;
   toast.classList.remove('show');
   const label = daily
     ? `Daily hole #${dailyNumber()}`
     : `Hole seed ${p.seed} · ${p.difficulty}`;
-  meta.textContent = `${label} · ${p.course.archetype} · par ${p.par}`;
-  if (!daily) location.hash = `#/hole/${p.seed}/${p.difficulty}`;
+  const biomeTag = p.biome && p.biome !== 'classic' ? ` · ${p.biome}` : '';
+  meta.textContent = `${label} · ${p.course.archetype}${biomeTag} · par ${p.par}`;
+  if (!daily) location.hash = `#/hole/${p.seed}/${p.difficulty}/${p.biome ?? 'classic'}`;
   refresh();
 }
 
@@ -171,14 +174,15 @@ document.getElementById('undo').addEventListener('click', () => {
   refresh();
 });
 document.getElementById('new').addEventListener('click', () => {
-  startPuzzle(makePuzzle((Math.random() * 0xffffffff) >>> 0, 'standard'), false);
+  const biome = document.getElementById('biome').value;
+  startPuzzle(makePuzzle((Math.random() * 0xffffffff) >>> 0, 'standard', biome), false);
 });
 document.getElementById('daily').addEventListener('click', () => {
   location.hash = '';
   startPuzzle(dailyPuzzle(), true);
 });
 document.getElementById('share').addEventListener('click', () => {
-  const url = `${location.origin}${location.pathname}#/hole/${puzzle.seed}/${puzzle.difficulty}`;
+  const url = `${location.origin}${location.pathname}#/hole/${puzzle.seed}/${puzzle.difficulty}/${puzzle.biome ?? 'classic'}`;
   navigator.clipboard?.writeText(url);
 });
 for (const b of document.querySelectorAll('[data-club]')) {

@@ -6,7 +6,7 @@
 import { substream, randInt } from './rng.js';
 import { generateCourse } from './generate.js';
 import { solve, verifyLine } from './solver.js';
-import { ROUGH, SAND, GREEN, WATER, TREES, isRestable } from './terrain.js';
+import { ROUGH, SAND, GREEN, WATER, TREES, ICE, isRestable, slopeDir } from './terrain.js';
 import { cellAt, inBounds, dist } from './course.js';
 
 export const DIFFICULTIES = ['easy', 'standard', 'rude'];
@@ -29,10 +29,10 @@ export const DIFFICULTIES = ['easy', 'standard', 'rude'];
  * @param {string} [difficulty]
  * @returns {Puzzle}
  */
-export function makePuzzle(seed, difficulty = 'standard') {
+export function makePuzzle(seed, difficulty = 'standard', biome = 'classic') {
   for (let attempt = 0; attempt < 32; attempt++) {
     const effectiveSeed = (seed + attempt) >>> 0;
-    const course = generateCourse(effectiveSeed);
+    const course = generateCourse(effectiveSeed, biome);
     const start = sampleBallStart(course, difficulty);
     if (!start) continue;
     const solution = solve(course, start);
@@ -41,6 +41,7 @@ export function makePuzzle(seed, difficulty = 'standard') {
     return {
       seed: effectiveSeed,
       difficulty,
+      biome,
       course,
       start,
       par: solution.strokes,
@@ -73,6 +74,7 @@ export function sampleBallStart(course, difficulty) {
     if (!inBounds(course, candidate.x, candidate.y)) continue;
     const lie = cellAt(course, candidate.x, candidate.y);
     if (!isRestable(lie) || lie === GREEN) continue;
+    if (lie === ICE || slopeDir(lie)) continue; // a resting ball can't start mid-slide
     if (dist(candidate, course.hole) < 12) continue;
 
     const inTrouble = lie === ROUGH || lie === SAND;

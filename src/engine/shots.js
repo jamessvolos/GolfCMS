@@ -3,7 +3,7 @@
 // by stroke number, so the same shot on the same seed always lands the same way.
 
 import { substream, randInt } from './rng.js';
-import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, isRestable } from './terrain.js';
+import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE, isRestable, slopeDir } from './terrain.js';
 import { inBounds, cellAt } from './course.js';
 
 /**
@@ -79,7 +79,38 @@ function rollBall(course, ball, dx, dy, range) {
     }
     if (t === ROUGH || t === SAND) break; // thick stuff kills the roll
   }
-  return { ball: pos, penalty: 0, holed: false, event: 'rolled' };
+  return settle(course, ball, pos, dx, dy, 'rolled');
+}
+
+/**
+ * Post-movement physics: ice carries the ball onward in its direction of
+ * travel; slope tiles shed it downhill. Runs until the ball rests on calm
+ * ground (bounded — opposing slopes can trap a ball, which is legal and
+ * deterministic). Water during a slide is the usual penalty return.
+ */
+function settle(course, origin, pos, dx, dy, event) {
+  let dir = unitDir(dx, dy);
+  for (let guard = 0; guard < 60; guard++) {
+    const t = cellAt(course, pos.x, pos.y);
+    const slide = t === ICE ? dir : slopeDir(t);
+    if (!slide || (slide.x === 0 && slide.y === 0)) break;
+    const next = { x: pos.x + slide.x, y: pos.y + slide.y };
+    if (!inBounds(course, next.x, next.y)) break;
+    const nt = cellAt(course, next.x, next.y);
+    if (nt === TREES) break;
+    if (nt === WATER) return { ball: origin, penalty: 1, holed: false, event: 'water' };
+    pos = next;
+    dir = slide;
+    if (pos.x === course.hole.x && pos.y === course.hole.y) {
+      return { ball: pos, penalty: 0, holed: true, event: 'holed' };
+    }
+  }
+  return { ball: pos, penalty: 0, holed: false, event };
+}
+
+function unitDir(dx, dy) {
+  // Quantize the travel vector to the 8 grid directions (22.5° dead zones).
+  return { x: Math.abs(dx) > 0.383 ? Math.sign(dx) : 0, y: Math.abs(dy) > 0.383 ? Math.sign(dy) : 0 };
 }
 
 /** Driver/iron/wedge: airborne to a landing tile, then a short roll. */
@@ -131,7 +162,7 @@ function flyBall(course, ball, dx, dy, range, club, strokeIndex) {
       return { ball: pos, penalty: 0, holed: true, event: 'holed' };
     }
   }
-  return { ball: pos, penalty: 0, holed: false, event: 'landed' };
+  return settle(course, ball, pos, dx, dy, 'landed');
 }
 
 function* pathTiles(from, to) {

@@ -4,15 +4,23 @@
 // a named RNG substream so future features never reshuffle old seeds.
 
 import { substream, randInt, pick, pickWeighted } from './rng.js';
-import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN } from './terrain.js';
-import { makeCourse, inBounds, cellAt, setCell } from './course.js';
+import {
+  FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE,
+  SLOPE_N, SLOPE_S, SLOPE_E, SLOPE_W,
+} from './terrain.js';
+import { makeCourse, inBounds, cellAt, setCell, dist } from './course.js';
 
 export const GEN_VERSION = 1;
 
 export const ARCHETYPES = ['straight', 'dogleg-left', 'dogleg-right', 'long'];
 
-/** @param {number} seed @returns {import('./course.js').Course} */
-export function generateCourse(seed) {
+// Biomes layer extra terrain over the classic pipeline via their own RNG
+// substreams, so a classic course is byte-identical whether or not biomes
+// exist in the codebase — already-shared seeds are sacred.
+export const BIOMES = ['classic', 'winter', 'alpine'];
+
+/** @param {number} seed @param {string} [biome] @returns {import('./course.js').Course} */
+export function generateCourse(seed, biome = 'classic') {
   const layout = substream(seed, 'layout');
   const hazards = substream(seed, 'hazards');
 
@@ -99,7 +107,51 @@ export function generateCourse(seed) {
   }
   setCell(course, tee.x, tee.y, FAIRWAY);
 
+  course.biome = biome;
+  if (biome === 'winter') addIce(course);
+  else if (biome === 'alpine') addSlopes(course);
+
   return course;
+}
+
+/** Winter: frozen patches on the playing surfaces. Ice keeps the ball moving. */
+function addIce(course) {
+  const rng = substream(course.seed, 'ice');
+  const patches = randInt(rng, 4, 7);
+  for (let i = 0; i < patches; i++) {
+    const cx = randInt(rng, 4, course.width - 5);
+    const cy = randInt(rng, 2, course.height - 3);
+    const radius = randInt(rng, 1, 2) + 0.5;
+    overlayDisc(course, cx, cy, radius, () => ICE);
+  }
+}
+
+/** Alpine: directional slope strips that shed the ball downhill. */
+function addSlopes(course) {
+  const rng = substream(course.seed, 'slopes');
+  const strips = randInt(rng, 5, 9);
+  for (let i = 0; i < strips; i++) {
+    const cx = randInt(rng, 4, course.width - 5);
+    const cy = randInt(rng, 2, course.height - 3);
+    const slope = pick(rng, [SLOPE_N, SLOPE_S, SLOPE_E, SLOPE_W]);
+    const radius = randInt(rng, 1, 2);
+    overlayDisc(course, cx, cy, radius + 0.5, () => slope);
+  }
+}
+
+/** Stamp over fairway/rough only — hazards, green, tee and hole are immune. */
+function overlayDisc(course, cx, cy, radius, terrainFor) {
+  const r = Math.ceil(radius);
+  for (let y = cy - r; y <= cy + r; y++) {
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (Math.hypot(x - cx, y - cy) > radius || !inBounds(course, x, y)) continue;
+      const t = cellAt(course, x, y);
+      if (t !== FAIRWAY && t !== ROUGH) continue;
+      if (x === course.tee.x && y === course.tee.y) continue;
+      if (dist({ x, y }, course.hole) <= 3) continue;
+      setCell(course, x, y, terrainFor());
+    }
+  }
 }
 
 function stampDisc(course, cx, cy, radius, terrain) {

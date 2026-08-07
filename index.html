@@ -25,7 +25,7 @@
     display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
     background: var(--panel); border-radius: 10px; padding: 10px 12px; margin-top: 10px;
   }
-  button {
+  button, select {
     background: #234732; color: var(--ink); border: 1px solid #38664a;
     border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer;
   }
@@ -69,6 +69,11 @@
   <span class="group">
     <button id="undo">Undo</button>
     <button id="daily">Daily</button>
+    <select id="biome" title="Biome for new holes">
+      <option value="classic" selected>classic</option>
+      <option value="winter">winter ❄️</option>
+      <option value="alpine">alpine ⛰️</option>
+    </select>
     <button id="new">New hole</button>
     <button id="share">Share link</button>
   </span>

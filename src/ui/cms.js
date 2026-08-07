@@ -5,7 +5,7 @@
 import { generateBatch, makeRecord, setStatus, exportCatalog, importCatalog, decodeShareCode } from '../engine/catalog.js';
 import { generateCourse } from '../engine/generate.js';
 import { cellAt } from '../engine/course.js';
-import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN } from '../engine/terrain.js';
+import { terrainColor } from './render.js';
 
 const STORE_KEY = 'golfcms.catalog.v1';
 const grid = document.getElementById('grid');
@@ -25,20 +25,15 @@ function save() {
   localStorage.setItem(STORE_KEY, exportCatalog(records));
 }
 
-const THUMB_COLORS = {
-  [FAIRWAY]: '#6db35f', [ROUGH]: '#4a7c45', [SAND]: '#e0c98f',
-  [WATER]: '#4f8fd0', [TREES]: '#2c5232', [GREEN]: '#8fd47f',
-};
-
 function drawThumb(canvas, record) {
-  const course = generateCourse(record.seed);
+  const course = generateCourse(record.seed, record.biome ?? 'classic');
   const s = 7;
   canvas.width = course.width * s;
   canvas.height = course.height * s;
   const ctx = canvas.getContext('2d');
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
-      ctx.fillStyle = THUMB_COLORS[cellAt(course, x, y)];
+      ctx.fillStyle = terrainColor(cellAt(course, x, y));
       ctx.fillRect(x * s, y * s, s, s);
     }
   }
@@ -67,7 +62,7 @@ function render() {
         <span class="badge ${r.status}">${r.status}</span>
       </div>
       <div class="row">
-        <span class="meta">seed ${r.seed} · ${r.archetype} · ${r.difficulty} · par ${r.par}</span>
+        <span class="meta">seed ${r.seed} · ${r.archetype} · ${r.difficulty}${r.biome && r.biome !== 'classic' ? ' · ' + r.biome : ''} · par ${r.par}</span>
         <span class="actions">
           <button data-act="play">Play</button>
           <button data-act="approve">Approve</button>
@@ -80,7 +75,7 @@ function render() {
       const act = e.target.dataset?.act;
       if (!act) return;
       if (act === 'play') {
-        window.open(`index.html#/hole/${r.seed}/${r.difficulty}`, '_blank');
+        window.open(`index.html#/hole/${r.seed}/${r.difficulty}/${r.biome ?? 'classic'}`, '_blank');
       } else if (act === 'delete') {
         records = records.filter((x) => x !== r);
         save();
@@ -102,11 +97,12 @@ function render() {
 document.getElementById('generate').addEventListener('click', () => {
   const count = Math.max(1, Math.min(60, Number(document.getElementById('count').value) || 12));
   const difficulty = document.getElementById('difficulty').value;
+  const biome = document.getElementById('biomeSel').value;
   const base = (Math.random() * 0xffffffff) >>> 0;
   statusEl.textContent = `certifying ${count} candidates…`;
   setTimeout(() => {
     const existing = new Set(records.map((r) => r.code));
-    records = [...generateBatch(base, count, difficulty).filter((r) => !existing.has(r.code)), ...records];
+    records = [...generateBatch(base, count, difficulty, biome).filter((r) => !existing.has(r.code)), ...records];
     save();
     render();
   }, 10);
@@ -142,15 +138,15 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
 
 document.getElementById('redeem').addEventListener('change', (e) => {
   try {
-    const { seed, difficulty } = decodeShareCode(e.target.value);
+    const { seed, difficulty, biome } = decodeShareCode(e.target.value);
     const existing = new Set(records.map((r) => r.code));
-    const rec = makeRecord(seed, difficulty);
+    const rec = makeRecord(seed, difficulty, biome);
     if (!existing.has(rec.code)) {
       records = [rec, ...records];
       save();
       render();
     }
-    window.open(`index.html#/hole/${seed}/${difficulty}`, '_blank');
+    window.open(`index.html#/hole/${seed}/${difficulty}/${biome}`, '_blank');
   } catch (err) {
     statusEl.textContent = err.message;
   }
