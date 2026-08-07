@@ -38,13 +38,34 @@ python3 -m http.server 8000
 - **Ghost races**: after any hole, copy a challenge link — your entire shot
   list packs into the URL (6 hex chars per stroke, no backend), and whoever
   opens it races your ghost stroke for stroke.
+- **Creator mode** (`editor.html`): repaint any generated hole tile by tile,
+  certify it with the solver, and share it as seed + patch in a URL. Tee and
+  cup stay anchored; uncertifiable holes can't be shared.
+- **Difficulty stars**: every certified hole is rated 1–5★ from its
+  certificate (par, lie, wind, biome), and the rating self-calibrates against
+  your own recorded rounds ("plays harder than rated for you").
+- **Sound**: fully synthesized Web Audio — thwocks, splashes, chimes, and an
+  ace fanfare, no asset files. Mute button in the HUD.
 
 ## The CMS
 
 Open `cms.html` for the catalog: batch-generate certified candidates (any
 biome), play them, approve or reject, filter, and export/import the catalog
 as JSON. `audit.html` renders 50 raw generator outputs on one screen — the
-fast human check against procedural blandness.
+fast human check against procedural blandness — and `ab.html` runs the blind
+A/B gate: six hand-authored holes shuffled with six generated ones; if you
+misidentify generated holes as authored ≥45% of the time, the generator has
+passed the bake-off's hardest exit criterion.
+
+## The optional leaderboard
+
+`npm run leaderboard` starts a zero-dependency verification service
+(`server/leaderboard.js`, node:http only). A score submission is a ghost
+replay string; the server re-simulates it against the seed with the same
+engine and only accepts runs that actually hole out — client-claimed stroke
+counts are ignored, making forged scores structurally impossible. The game
+never depends on it: set `localStorage['golfcms.leaderboard.url']` to opt in,
+and results silently include your rank when the service is reachable.
 Puzzles are stored as `(seed, difficulty)` tuples — courses are re-derived,
 never persisted. Share codes look like `GLF-1KZD-YYTV-S`, survive
 handwriting (Crockford base32, check digit), and regenerate the exact course
@@ -71,7 +92,7 @@ and ball start anywhere.
 ## Development
 
 ```sh
-npm test   # node --test: 74 tests, ~5s
+npm test   # node --test: 90+ tests, ~5s
 ```
 
 The engine (`src/engine/`) is pure functions with no DOM imports; the UI

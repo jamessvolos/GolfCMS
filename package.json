@@ -4,7 +4,8 @@
   "description": "Daily Links — an infinite, seed-driven, turn-based golf puzzle with a built-in CMS",
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "leaderboard": "node server/leaderboard.js"
   },
   "license": "MIT"
 }

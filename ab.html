@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🎭</text></svg>">
+<title>GolfCMS — Blind A/B Gate</title>
+<style>
+  :root { --bg: #10241a; --panel: #1a3527; --ink: #eaf5ec; --dim: #9db8a5; --ok: #6fd08c; --bad: #e07a6f; --accent: #ffd166; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; padding: 16px; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin-bottom: 14px; text-align: center; }
+  .sub a { color: var(--ok); }
+  #quiz, #results { background: var(--panel); border-radius: 10px; padding: 14px; max-width: 680px; width: 100%; }
+  #progress { color: var(--dim); margin-bottom: 8px; }
+  canvas { width: 100%; border-radius: 6px; display: block; }
+  .row { display: flex; gap: 10px; margin-top: 12px; justify-content: center; }
+  button { background: #234732; color: var(--ink); border: 1px solid #38664a; border-radius: 8px; padding: 8px 18px; font: inherit; cursor: pointer; }
+  button:hover { background: #2c5940; }
+  .big { font-size: 30px; font-weight: 700; }
+  .pass { color: var(--ok); }
+  .fail { color: var(--bad); }
+  #best { color: var(--accent); margin-top: 8px; }
+  #breakdown { list-style: none; padding: 0; margin: 12px 0 0; color: var(--dim); font-size: 12px; columns: 2; }
+  #breakdown .right { color: var(--ok); }
+  #breakdown .wrong { color: var(--bad); }
+</style>
+</head>
+<body>
+<h1>Blind A/B Gate 🎭</h1>
+<div class="sub">Twelve holes, shuffled: six drawn by a human architect, six by the generator.
+Tee is white, cup is red on every card — no tells. Call each one.
+<a href="index.html">Game</a> · <a href="audit.html">Audit</a> · <a href="cms.html">CMS</a></div>
+<div id="quiz">
+  <div id="progress"></div>
+  <canvas id="thumb"></canvas>
+  <div class="row">
+    <button id="say-authored">Authored</button>
+    <button id="say-generated">Generated</button>
+  </div>
+</div>
+<div id="results" hidden>
+  <div id="verdict"></div>
+  <div id="best"></div>
+  <ol id="breakdown"></ol>
+  <div class="row"><button id="again">Play again</button></div>
+</div>
+<script type="module" src="src/ui/ab.js"></script>
+</body>
+</html>
