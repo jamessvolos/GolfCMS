@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🗂️</text></svg>">
+<title>GolfCMS — Puzzle Catalog</title>
+<style>
+  :root {
+    --bg: #10241a; --panel: #1a3527; --ink: #eaf5ec; --dim: #9db8a5;
+    --accent: #ffd166; --ok: #6fd08c; --bad: #e07070;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin-bottom: 14px; }
+  .sub a { color: var(--ok); }
+  #controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: var(--panel); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+  button, select, input {
+    background: #234732; color: var(--ink); border: 1px solid #38664a;
+    border-radius: 8px; padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #2c5940; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border-radius: 10px; padding: 10px; }
+  .card canvas { width: 100%; border-radius: 6px; display: block; }
+  .card .row { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 6px; flex-wrap: wrap; }
+  .code { font-family: ui-monospace, monospace; color: var(--accent); font-size: 13px; }
+  .badge { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; padding: 2px 8px; border-radius: 99px; border: 1px solid; }
+  .badge.generated { color: var(--dim); border-color: var(--dim); }
+  .badge.approved { color: var(--ok); border-color: var(--ok); }
+  .badge.rejected { color: var(--bad); border-color: var(--bad); }
+  .meta { color: var(--dim); font-size: 12px; }
+  .actions button { padding: 3px 8px; font-size: 12px; }
+  #empty { color: var(--dim); padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>GolfCMS 🗂️ Puzzle Catalog</h1>
+<div class="sub">Generate candidates, play them, approve the keepers. Records live in your browser; export to share. <a href="index.html">Back to the game</a></div>
+<div id="controls">
+  <label>Batch <input id="count" type="number" value="12" min="1" max="60" style="width:60px"></label>
+  <select id="difficulty">
+    <option value="standard" selected>standard</option>
+    <option value="easy">easy</option>
+    <option value="rude">rude</option>
+  </select>
+  <button id="generate">Generate candidates</button>
+  <select id="filter">
+    <option value="all" selected>all statuses</option>
+    <option value="generated">generated</option>
+    <option value="approved">approved</option>
+    <option value="rejected">rejected</option>
+  </select>
+  <button id="export">Export JSON</button>
+  <button id="import">Import JSON</button>
+  <input id="importFile" type="file" accept="application/json" hidden>
+  <label>Redeem code <input id="redeem" placeholder="GLF-XXXX-XXXX-S" style="width:150px"></label>
+  <span id="status" class="meta"></span>
+</div>
+<div id="grid"></div>
+<div id="empty" hidden>No puzzles yet — generate a batch above.</div>
+<script type="module" src="src/ui/cms.js"></script>
+</body>
+</html>
