@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>⛳</text></svg>">
+<title>GolfCMS — Daily Links</title>
+<style>
+  :root {
+    --bg: #10241a; --panel: #1a3527; --ink: #eaf5ec; --dim: #9db8a5;
+    --accent: #ffd166; --accent2: #6fd08c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, sans-serif; display: flex; flex-direction: column;
+    align-items: center; min-height: 100vh; padding: 12px;
+  }
+  h1 { font-size: 20px; margin: 4px 0 2px; letter-spacing: 0.5px; }
+  h1 .flag { color: var(--accent); }
+  #meta { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
+  #wrap { position: relative; max-width: 100%; }
+  canvas { border-radius: 10px; max-width: 100%; height: auto; display: block; cursor: crosshair; }
+  #hud {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    background: var(--panel); border-radius: 10px; padding: 10px 12px; margin-top: 10px;
+  }
+  button {
+    background: #234732; color: var(--ink); border: 1px solid #38664a;
+    border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #2c5940; }
+  button.active { background: var(--accent2); color: #10241a; border-color: var(--accent2); font-weight: 600; }
+  button:disabled { opacity: 0.35; cursor: default; }
+  .group { display: flex; gap: 4px; align-items: center; }
+  .label { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-right: 2px; }
+  #score { font-weight: 600; min-width: 130px; }
+  #toast {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10, 20, 14, 0.72); border-radius: 10px; flex-direction: column; gap: 10px;
+  }
+  #toast.show { display: flex; }
+  #toast .big { font-size: 34px; font-weight: 700; color: var(--accent); }
+  #toast .sub { color: var(--ink); }
+  #foot { color: var(--dim); font-size: 12px; margin-top: 10px; }
+  #foot a { color: var(--accent2); }
+</style>
+</head>
+<body>
+<h1>Daily Links <span class="flag">⛳</span> <small style="color:var(--dim);font-weight:400">by GolfCMS</small></h1>
+<div id="meta">loading…</div>
+<div id="wrap">
+  <canvas id="course" width="960" height="576"></canvas>
+  <div id="toast"><div class="big"></div><div class="sub"></div><button id="toast-share">Copy result</button></div>
+</div>
+<div id="hud">
+  <span id="score">Par – · Strokes 0</span>
+  <span class="group"><span class="label">Club</span>
+    <button data-club="driver">Driver</button>
+    <button data-club="iron" class="active">Iron</button>
+    <button data-club="wedge">Wedge</button>
+    <button data-club="putter">Putter</button>
+  </span>
+  <span class="group"><span class="label">Power</span>
+    <button data-power="1">1</button>
+    <button data-power="2" class="active">2</button>
+    <button data-power="3">3</button>
+  </span>
+  <span class="group">
+    <button id="undo">Undo</button>
+    <button id="daily">Daily</button>
+    <button id="new">New hole</button>
+    <button id="share">Share link</button>
+  </span>
+</div>
+<div id="foot">Aim with the mouse, click to swing. Shaded tiles preview where the shot can land. <a href="cms.html">Open the CMS</a></div>
+<script type="module" src="src/ui/main.js"></script>
+</body>
+</html>
