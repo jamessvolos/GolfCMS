@@ -6,6 +6,17 @@ import { createGame, applyShot, undoShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
 import { draw, TILE } from './render.js';
+import { recordRound, dailyStreak, summary } from '../engine/stats.js';
+
+const ROUNDS_KEY = 'golfcms.rounds.v1';
+
+function loadRounds() {
+  try {
+    return JSON.parse(localStorage.getItem(ROUNDS_KEY)) ?? [];
+  } catch {
+    return [];
+  }
+}
 
 const canvas = document.getElementById('course');
 const ctx = canvas.getContext('2d');
@@ -19,6 +30,7 @@ let club = 'iron';
 let power = 2;
 let aim = null;
 let isDaily = false;
+let recorded = false;
 
 function loadFromHash() {
   const h = location.hash;
@@ -36,6 +48,7 @@ function startPuzzle(p, daily) {
   isDaily = daily;
   game = createGame(p.seed, p.start);
   aim = null;
+  recorded = false;
   toast.classList.remove('show');
   const label = daily
     ? `Daily hole #${dailyNumber()}`
@@ -46,6 +59,7 @@ function startPuzzle(p, daily) {
 }
 
 function refresh() {
+  window.__game = game; // debug/test hook: read-only view of live state
   updateHud();
   draw(ctx, puzzle.course, game, aim);
   if (game.holed) showResult();
@@ -125,12 +139,26 @@ export function resultText(g, p, daily) {
     { 2: '🟨', 1: '🟩' }[cellAt(p.course, h.ball.x, h.ball.y)] ?? '🟩'
   )).join('');
   const label = daily ? `Daily Links #${dailyNumber()}` : `Daily Links seed ${p.seed}`;
-  return `${label} — ${g.strokes}/${p.par} ${trail}`;
+  const streak = daily ? dailyStreak(loadRounds(), new Date().toISOString().slice(0, 10)) : 0;
+  return `${label} — ${g.strokes}/${p.par} ${trail}` + (streak > 1 ? ` 🔥${streak}` : '');
 }
 
 function showResult() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!recorded) {
+    recorded = true;
+    localStorage.setItem(ROUNDS_KEY, JSON.stringify(recordRound(loadRounds(), {
+      date: today, seed: puzzle.seed, strokes: game.strokes, par: puzzle.par, daily: isDaily,
+    })));
+  }
+  const rounds = loadRounds();
+  const streak = dailyStreak(rounds, today);
+  const s = summary(rounds);
   toast.querySelector('.big').textContent = scoreWord(game.strokes, puzzle.par);
-  toast.querySelector('.sub').textContent = `${game.strokes} strokes on a par ${puzzle.par}`;
+  toast.querySelector('.sub').textContent =
+    `${game.strokes} strokes on a par ${puzzle.par}` +
+    (streak > 0 ? ` · 🔥 ${streak}-day streak` : '') +
+    ` · ${s.rounds} rounds, avg ${s.avgVsPar >= 0 ? '+' : ''}${s.avgVsPar} vs par`;
   toast.classList.add('show');
 }
 
