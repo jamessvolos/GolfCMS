@@ -4,6 +4,7 @@
 import { makePuzzle, dailyPuzzle, dailyNumber, DIFFICULTIES } from '../engine/puzzle.js';
 import { BIOMES } from '../engine/generate.js';
 import { makeRound, scorecard } from '../engine/round.js';
+import { encodeReplay, decodeReplay, ghostPath, quantizeAngle } from '../engine/replay.js';
 import { createGame, applyShot, undoShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
@@ -34,9 +35,11 @@ let aim = null;
 let isDaily = false;
 let recorded = false;
 let round = null; // {data, index, strokes[]} while a 9-hole round is live
+let ghost = null; // {positions, index, holed, strokes} while racing a replay
+let anim = null; // {from, to, t0} while the ball is in flight
 
 function loadFromHash() {
-  const h = location.hash;
+  const [h, query] = location.hash.split('?');
   const roundMatch = h.match(/^#\/round\/(\d+)(?:\/(\w+))?/);
   if (roundMatch) {
     const seed = Number(roundMatch[1]) >>> 0;
@@ -51,6 +54,16 @@ function loadFromHash() {
     const difficulty = DIFFICULTIES.includes(holeMatch[2]) ? holeMatch[2] : 'standard';
     const biome = BIOMES.includes(holeMatch[3]) ? holeMatch[3] : 'classic';
     startPuzzle(makePuzzle(Number(holeMatch[1]) >>> 0, difficulty, biome), false);
+    const g = new URLSearchParams(query ?? '').get('g');
+    if (g) {
+      try {
+        ghost = { ...ghostPath(puzzle.course, puzzle.start, decodeReplay(g)), index: 0 };
+        meta.textContent += ` · racing a ghost (${ghost.strokes} strokes)`;
+        refresh();
+      } catch {
+        ghost = null;
+      }
+    }
   } else {
     startPuzzle(dailyPuzzle(), true);
   }
@@ -79,6 +92,8 @@ function loadRoundHole() {
 
 function startPuzzle(p, daily) {
   round = null;
+  ghost = null;
+  anim = null;
   puzzle = p;
   isDaily = daily;
   game = createGame(p.seed, p.start, p.biome);
@@ -90,16 +105,52 @@ function startPuzzle(p, daily) {
     : `Hole seed ${p.seed} · ${p.difficulty}`;
   const biomeTag = p.biome && p.biome !== 'classic' ? ` · ${p.biome}` : '';
   meta.textContent = `${label} · ${p.course.archetype}${biomeTag} · par ${p.par}`;
-  if (!daily) location.hash = `#/hole/${p.seed}/${p.difficulty}/${p.biome ?? 'classic'}`;
+  if (!daily) {
+    const path = `#/hole/${p.seed}/${p.difficulty}/${p.biome ?? 'classic'}`;
+    // Preserve a ?g= ghost param if the hash already points at this hole.
+    if (location.hash.split('?')[0] !== path) location.hash = path;
+  }
   refresh();
 }
 
 function refresh() {
   window.__game = game; // debug/test hook: read-only view of live state
-  window.__debugShot = (shot) => { game = applyShot(game, shot); refresh(); };
+  window.__debugShot = (shot) => { takeShot(shot); };
   updateHud();
-  draw(ctx, puzzle.course, game, aim);
-  if (game.holed) showResult();
+  draw(ctx, puzzle.course, game, anim ? null : aim, { ghost });
+  if (!anim && game.holed) showResult();
+}
+
+/** Apply a shot, advance any ghost, and animate the ball to its new lie. */
+function takeShot(shot) {
+  const from = { ...game.ball };
+  game = applyShot(game, shot);
+  aim = null;
+  if (ghost && ghost.index < ghost.positions.length - 1) ghost.index++;
+  const to = game.ball;
+  if (to.x !== from.x || to.y !== from.y) {
+    anim = { from, to, t0: performance.now() };
+    requestAnimationFrame(stepAnim);
+  } else {
+    refresh();
+  }
+}
+
+function stepAnim(now) {
+  if (!anim) return;
+  const t = Math.min(1, (now - anim.t0) / 260);
+  const ease = 1 - (1 - t) * (1 - t);
+  const ballPos = {
+    x: anim.from.x + (anim.to.x - anim.from.x) * ease,
+    y: anim.from.y + (anim.to.y - anim.from.y) * ease,
+  };
+  draw(ctx, puzzle.course, game, null, { ghost, ballPos });
+  if (t < 1) {
+    requestAnimationFrame(stepAnim);
+  } else {
+    anim = null;
+    refresh();
+  }
 }
 
 function updateHud() {
@@ -143,20 +194,20 @@ function computePreview(angle) {
 }
 
 canvas.addEventListener('mousemove', (e) => {
-  if (game.holed) return;
+  if (game.holed || anim) return;
   const r = canvas.getBoundingClientRect();
   const scale = canvas.width / r.width;
   const mx = (e.clientX - r.left) * scale / TILE - 0.5;
   const my = (e.clientY - r.top) * scale / TILE - 0.5;
-  aim = computePreview(Math.atan2(my - game.ball.y, mx - game.ball.x));
+  // Aim on the replay codec's angle lattice so every played shot encodes
+  // into a ghost URL bit-exactly.
+  aim = computePreview(quantizeAngle(Math.atan2(my - game.ball.y, mx - game.ball.x)));
   refresh();
 });
 
 canvas.addEventListener('click', () => {
-  if (game.holed || !aim) return;
-  game = applyShot(game, { club, angle: aim.angle, power });
-  aim = null;
-  refresh();
+  if (game.holed || anim || !aim) return;
+  takeShot({ club, angle: aim.angle, power });
 });
 
 function scoreWord(strokes, par) {
@@ -222,22 +273,35 @@ function showResult() {
     return;
   }
   nextBtn.hidden = true;
+  document.getElementById('toast-challenge').hidden = false;
   const rounds = loadRounds();
   const streak = dailyStreak(rounds, today);
   const s = summary(rounds);
+  const race = ghost && ghost.holed
+    ? game.strokes < ghost.strokes ? ' · 👻 ghost beaten!'
+      : game.strokes === ghost.strokes ? ' · 👻 tied the ghost' : ' · 👻 the ghost wins'
+    : '';
   toast.querySelector('.big').textContent = scoreWord(game.strokes, puzzle.par);
   toast.querySelector('.sub').textContent =
-    `${game.strokes} strokes on a par ${puzzle.par}` +
+    `${game.strokes} strokes on a par ${puzzle.par}` + race +
     (streak > 0 ? ` · 🔥 ${streak}-day streak` : '') +
     ` · ${s.rounds} rounds, avg ${s.avgVsPar >= 0 ? '+' : ''}${s.avgVsPar} vs par`;
   toast.classList.add('show');
 }
+
+document.getElementById('toast-challenge').addEventListener('click', () => {
+  const replay = encodeReplay(game.history.map((h) => h.shot));
+  const url = `${location.origin}${location.pathname}` +
+    `#/hole/${puzzle.seed}/${puzzle.difficulty}/${puzzle.biome ?? 'classic'}?g=${replay}`;
+  navigator.clipboard?.writeText(`Race my ${game.strokes}-stroke ghost: ${url}`);
+});
 
 document.getElementById('toast-share').addEventListener('click', () => {
   navigator.clipboard?.writeText(resultText(game, puzzle, isDaily) + '\n' + location.href);
 });
 document.getElementById('undo').addEventListener('click', () => {
   game = undoShot(game);
+  if (ghost) ghost.index = Math.max(0, ghost.index - 1);
   toast.classList.remove('show');
   refresh();
 });

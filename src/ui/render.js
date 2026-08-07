@@ -33,7 +33,8 @@ function drawSlopeArrow(ctx, x, y, dir) {
   ctx.fill();
 }
 
-export function draw(ctx, course, game, aim) {
+export function draw(ctx, course, game, aim, opts = {}) {
+  const ballPos = opts.ballPos ?? game.ball;
   const { width, height } = course;
   ctx.canvas.width = width * TILE;
   ctx.canvas.height = height * TILE;
@@ -102,6 +103,25 @@ export function draw(ctx, course, game, aim) {
   }
   ctx.stroke();
 
+  // ghost: a rival's replay racing you, one stroke behind your input
+  if (opts.ghost) {
+    const { positions, index } = opts.ghost;
+    ctx.strokeStyle = 'rgba(160, 210, 255, 0.5)';
+    ctx.setLineDash([3, 5]);
+    ctx.beginPath();
+    ctx.moveTo((positions[0].x + 0.5) * TILE, (positions[0].y + 0.5) * TILE);
+    for (let i = 1; i <= index; i++) {
+      ctx.lineTo((positions[i].x + 0.5) * TILE, (positions[i].y + 0.5) * TILE);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const gp = positions[Math.min(index, positions.length - 1)];
+    ctx.fillStyle = 'rgba(160, 210, 255, 0.65)';
+    ctx.beginPath();
+    ctx.arc((gp.x + 0.5) * TILE, (gp.y + 0.5) * TILE, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // hole + flag
   const hx = (course.hole.x + 0.5) * TILE;
   const hy = (course.hole.y + 0.5) * TILE;
@@ -126,7 +146,7 @@ export function draw(ctx, course, game, aim) {
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = 'rgba(0,0,0,0.4)';
   ctx.beginPath();
-  ctx.arc((game.ball.x + 0.5) * TILE, (game.ball.y + 0.5) * TILE, 6, 0, Math.PI * 2);
+  ctx.arc((ballPos.x + 0.5) * TILE, (ballPos.y + 0.5) * TILE, 6, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 }
