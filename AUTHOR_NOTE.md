@@ -90,7 +90,7 @@ identically — the golden fixtures from Wave 5 never changed and never failed:
 | 7 — Rounds | `69bb0d0` | 9-hole rounds from one seed with a shaped difficulty curve, running scorecard, next-hole flow, emoji-per-hole round shares. Verified by playing all nine holes in Chromium via solver-certificate replay: 27 strokes on par 27. |
 | 8 — Ghosts | `3ab6444` | Shot lists packed into URLs (6 hex chars per stroke, zero backend); aim input snaps to the codec's 16-bit angle lattice so ghosts reproduce the sharer's round bit-exactly; translucent ghost racing and animated ball flight. |
 | 9 — Wind | `31d0d45` | Links biome: near-treeless dunes with pot bunkers and an always-on wind that drifts airborne shots scaled by carry (putts immune); on-canvas wind sock; solver certifies every links hole in its wind. |
-| 10 — Clubhouse II | see `git log` | Weekly gauntlet (five certified holes per ISO week escalating classic → winter → alpine → rude links), full keyboard play, `audit.html` (50 generator outputs at a glance for oatmeal-spotting), docs. |
+| 10 — Clubhouse II | `6ba0575` | Weekly gauntlet (five certified holes per ISO week escalating classic → winter → alpine → rude links), full keyboard play, `audit.html` (50 generator outputs at a glance for oatmeal-spotting), docs. |
 
 **Proof, round two:** the suite grew from 46 to 74 tests, all passing —
 including cross-biome solvability sweeps, a zero-wind regression proving
