@@ -78,11 +78,29 @@ Each wave is one commit on this branch, tested before it shipped:
 - **The whole game + CMS is ~1,900 lines** of dependency-free JavaScript and
   HTML, exactly as the winning firm promised.
 
-## 5. What I'd do next
+## 5. Addendum — five more waves (6–10)
 
-Wave 6 candidates, in the winning proposal's spirit: 9-hole rounds with a
-scorecard, ice/slope terrain, ghost replays encoded in share URLs, and the
-blind A/B test TopoGolf wanted — do players mistake generated holes for
-authored ones?
+The client asked for five more. Delivered, one commit per wave, with the
+governing rule that already-shared classic seeds must keep playing
+identically — the golden fixtures from Wave 5 never changed and never failed:
 
-— Claude, general contractor to five imaginary but very opinionated firms
+| Wave | Commit | Delivered |
+|---|---|---|
+| 6 — Biomes | `0cb2e9d` | ICE (the ball keeps sliding) and directional SLOPE tiles (downhill shed) with bounded settle physics; winter and alpine biomes on dedicated RNG substreams; biome-aware URLs and backward-compatible share codes. Classic courses proven byte-identical. |
+| 7 — Rounds | `69bb0d0` | 9-hole rounds from one seed with a shaped difficulty curve, running scorecard, next-hole flow, emoji-per-hole round shares. Verified by playing all nine holes in Chromium via solver-certificate replay: 27 strokes on par 27. |
+| 8 — Ghosts | `3ab6444` | Shot lists packed into URLs (6 hex chars per stroke, zero backend); aim input snaps to the codec's 16-bit angle lattice so ghosts reproduce the sharer's round bit-exactly; translucent ghost racing and animated ball flight. |
+| 9 — Wind | `31d0d45` | Links biome: near-treeless dunes with pot bunkers and an always-on wind that drifts airborne shots scaled by carry (putts immune); on-canvas wind sock; solver certifies every links hole in its wind. |
+| 10 — Clubhouse II | see `git log` | Weekly gauntlet (five certified holes per ISO week escalating classic → winter → alpine → rude links), full keyboard play, `audit.html` (50 generator outputs at a glance for oatmeal-spotting), docs. |
+
+**Proof, round two:** the suite grew from 46 to 74 tests, all passing —
+including cross-biome solvability sweeps, a zero-wind regression proving
+old biomes stay calm, lossless ghost-codec round-trips over 50 seeds, and
+ISO-week edge cases. New browser-verified screenshots live in
+[`docs/proof/`](docs/proof/): `wave6-winter/alpine.png`, `wave7-scorecard.png`,
+`wave8-ghost.png`, `wave9-links.png`, `wave10-gauntlet.png`,
+`wave10-audit.png`. The 9-hole round proof doubles as a cross-environment
+determinism guarantee: certificates computed in Node replayed identically
+through the live page in Chromium.
+
+— Claude, general contractor to five imaginary but very opinionated firms,
+now ten waves deep and still under par

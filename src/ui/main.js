@@ -5,6 +5,7 @@ import { makePuzzle, dailyPuzzle, dailyNumber, DIFFICULTIES } from '../engine/pu
 import { BIOMES } from '../engine/generate.js';
 import { makeRound, scorecard } from '../engine/round.js';
 import { encodeReplay, decodeReplay, ghostPath, quantizeAngle } from '../engine/replay.js';
+import { makeGauntlet } from '../engine/gauntlet.js';
 import { createGame, applyShot, undoShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
@@ -40,6 +41,13 @@ let anim = null; // {from, to, t0} while the ball is in flight
 
 function loadFromHash() {
   const [h, query] = location.hash.split('?');
+  if (h.startsWith('#/gauntlet')) {
+    const g = makeGauntlet();
+    if (round && round.data.label === g.label) return;
+    round = { data: g, index: 0, strokes: [] };
+    loadRoundHole();
+    return;
+  }
   const roundMatch = h.match(/^#\/round\/(\d+)(?:\/(\w+))?/);
   if (roundMatch) {
     const seed = Number(roundMatch[1]) >>> 0;
@@ -79,13 +87,16 @@ function loadRoundHole() {
   const p = round.data.holes[round.index];
   puzzle = p;
   isDaily = false;
+  ghost = null;
+  anim = null;
   game = createGame(p.seed, p.start, p.biome);
   aim = null;
   recorded = false;
   toast.classList.remove('show');
   const biomeTag = p.biome !== 'classic' ? ` · ${p.biome}` : '';
+  const label = round.data.label ?? `Round ${round.data.seed}`;
   meta.textContent =
-    `Round ${round.data.seed} · hole ${round.index + 1}/9 · ${p.course.archetype}${biomeTag}` +
+    `${label} · hole ${round.index + 1}/${round.data.holes.length} · ${p.course.archetype}${biomeTag}` +
     ` · par ${p.par} · course par ${round.data.totalPar}`;
   refresh();
 }
@@ -232,7 +243,8 @@ export function resultText(g, p, daily) {
         return e.strokes === 1 ? '🎯' : d <= -2 ? '🦅' : d === -1 ? '🐦' : d === 0 ? '🟢' : d === 1 ? '🟨' : '🟥';
       })
       .join('');
-    return `Daily Links round ${round.data.seed} — ${card.totalStrokes}/${round.data.totalPar} (${vs}) ${holes}`;
+    const label = round.data.label ?? `round ${round.data.seed}`;
+    return `Daily Links ${label} — ${card.totalStrokes}/${round.data.totalPar} (${vs}) ${holes}`;
   }
   const trail = g.history.map((h) => (
     { holed: '⛳', water: '🟦', 'out-of-bounds': '🟥', trees: '🌲' }[h.event] ??
@@ -312,6 +324,10 @@ document.getElementById('new').addEventListener('click', () => {
 document.getElementById('newround').addEventListener('click', () => {
   startRound((Math.random() * 0xffffffff) >>> 0, document.getElementById('biome').value);
 });
+document.getElementById('gauntlet').addEventListener('click', () => {
+  round = null;
+  location.hash = '#/gauntlet';
+});
 document.getElementById('toast-next').addEventListener('click', () => {
   if (!round) return;
   round.index++;
@@ -331,6 +347,59 @@ for (const b of document.querySelectorAll('[data-club]')) {
 for (const b of document.querySelectorAll('[data-power]')) {
   b.addEventListener('click', () => { power = Number(b.dataset.power); refresh(); });
 }
+// Full keyboard play: arrows aim and set power, C cycles clubs, Space swings.
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if (game.holed || anim) {
+    if (e.key === 'Enter' && round && !document.getElementById('toast-next').hidden) {
+      document.getElementById('toast-next').click();
+    }
+    return;
+  }
+  const currentAngle = aim?.angle ??
+    Math.atan2(puzzle.course.hole.y - game.ball.y, puzzle.course.hole.x - game.ball.x);
+  const step = e.shiftKey ? (Math.PI * 2) / 2048 : (Math.PI * 2) / 128;
+  switch (e.key) {
+    case 'ArrowLeft':
+      aim = computePreview(quantizeAngle(currentAngle - step));
+      break;
+    case 'ArrowRight':
+      aim = computePreview(quantizeAngle(currentAngle + step));
+      break;
+    case 'ArrowUp':
+      power = Math.min(3, power + 1);
+      if (aim) aim = computePreview(aim.angle);
+      break;
+    case 'ArrowDown':
+      power = Math.max(1, power - 1);
+      if (aim) aim = computePreview(aim.angle);
+      break;
+    case '1': case '2': case '3':
+      power = Number(e.key);
+      if (aim) aim = computePreview(aim.angle);
+      break;
+    case 'c': case 'C': {
+      const enabled = [...document.querySelectorAll('[data-club]')]
+        .filter((b) => !b.disabled).map((b) => b.dataset.club);
+      club = enabled[(enabled.indexOf(club) + 1) % enabled.length];
+      if (aim) aim = computePreview(aim.angle);
+      break;
+    }
+    case 'u': case 'U':
+      document.getElementById('undo').click();
+      return;
+    case ' ': case 'Enter':
+      if (!aim) aim = computePreview(quantizeAngle(currentAngle));
+      takeShot({ club, angle: aim.angle, power });
+      e.preventDefault();
+      return;
+    default:
+      return;
+  }
+  e.preventDefault();
+  refresh();
+});
+
 window.addEventListener('hashchange', loadFromHash);
 
 loadFromHash();

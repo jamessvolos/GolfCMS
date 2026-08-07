@@ -17,20 +17,34 @@ python3 -m http.server 8000
 # → http://localhost:8000/#/hole/1837462913/standard   a specific shared hole
 ```
 
-- **Aim** with the mouse — the shaded band previews every tile the shot can land on.
+- **Aim** with the mouse — the shaded band previews every tile the shot can
+  land on — or play entirely by keyboard: arrows aim (shift for fine) and set
+  power, `C` cycles clubs, `Space` swings, `U` undoes.
 - **Click** to swing. Pick a club (driver/iron/wedge/putter) and a power notch (1–3).
 - Terrain is the puzzle: rough shortens your next shot, sand forces a wedge or
   putter at half range, water and out-of-bounds cost a penalty stroke, trees
   block low iron flight but not the driver's high ball, and putts roll
-  tile-by-tile through everything en route.
+  tile-by-tile through everything en route. Ice keeps a moving ball moving,
+  slope tiles shed it downhill, and links wind bends every airborne shot.
+- **Four biomes**: classic, winter ❄️ (ice), alpine ⛰️ (slopes), links 💨
+  (dunes and wind). Biomes live in the URL and in share codes.
 - **Daily mode**: everyone on Earth gets the same certified hole each day —
   gentle early week, rude Saturdays (you start in trouble). Streaks and stats
   are tracked locally; results copy as spoiler-free emoji traces.
+- **9-hole rounds** (`#/round/<seed>/<biome>`): one seed fans out into nine
+  certified holes with a shaped difficulty curve and a running scorecard.
+- **The weekly gauntlet** (`#/gauntlet`): five holes per ISO week escalating
+  classic → winter → alpine → rude links in the wind.
+- **Ghost races**: after any hole, copy a challenge link — your entire shot
+  list packs into the URL (6 hex chars per stroke, no backend), and whoever
+  opens it races your ghost stroke for stroke.
 
 ## The CMS
 
-Open `cms.html` for the catalog: batch-generate certified candidates, play
-them, approve or reject, filter, and export/import the catalog as JSON.
+Open `cms.html` for the catalog: batch-generate certified candidates (any
+biome), play them, approve or reject, filter, and export/import the catalog
+as JSON. `audit.html` renders 50 raw generator outputs on one screen — the
+fast human check against procedural blandness.
 Puzzles are stored as `(seed, difficulty)` tuples — courses are re-derived,
 never persisted. Share codes look like `GLF-1KZD-YYTV-S`, survive
 handwriting (Crockford base32, check digit), and regenerate the exact course
@@ -57,7 +71,7 @@ and ball start anywhere.
 ## Development
 
 ```sh
-npm test   # node --test: 46 tests, ~4s
+npm test   # node --test: 74 tests, ~5s
 ```
 
 The engine (`src/engine/`) is pure functions with no DOM imports; the UI
