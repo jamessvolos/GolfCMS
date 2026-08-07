@@ -1,9 +1,17 @@
-# GolfCMS · Daily Links ⛳
+# GolfCMS · Caddie 🎯
 
-An infinite, seed-driven, turn-based golf puzzle game with a built-in content
-management system. Every course is procedurally generated; every ball starting
-location is sampled to pose a genuine puzzle; every published hole carries a
-machine-verified proof that it can be beaten.
+**GeoGuessr for golf strategy.** You're dropped on a procedurally generated
+hole and you don't swing — you **pick targets** for the tee shot and every
+approach. Your shot lands somewhere in your real **dispersion pattern** (an
+ellipse that grows with distance and worsens from rough, sand, and trees),
+and every decision is scored in **strokes gained against the optimal
+target**, computed by value iteration over the whole hole with the same
+dispersion model. After each commit: the reveal — an expected-strokes
+heatmap of every aim you could have chosen, the caddie's optimal ring, your
+✕, and the SG bill. Five holes per round, 1000 points per hole, daily seed.
+
+The original execution game (clubs, power, putting) lives on at
+`arcade.html`, along with the CMS, editor, audit grid, and blind A/B test.
 
 Zero dependencies. No build step. One static page.
 

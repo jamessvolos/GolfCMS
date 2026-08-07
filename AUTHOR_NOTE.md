@@ -128,5 +128,28 @@ After ten waves the client said "all seven" to the roadmap, so:
    thwocks, splashes, sand thuds, ice shimmer, hole chimes, an ace fanfare.
    No asset files, mute persisted.
 
+## 7. Addendum — the pivot: Caddie
+
+The client called it: the arcade game had lost the plot. The real product is
+**GeoGuessr meets a shot-pattern app** — a course-management trainer where
+you pick aim targets for tee and approach shots and get scored on decision
+quality. So:
+
+- `src/engine/dispersion.js` — distance-scaled elliptical shot patterns
+  (long-axis depth error > lateral, widened by rough/sand/tree lies), fixed
+  low-discrepancy offsets for expectation math, seeded draws for the ball
+  that actually flies.
+- `src/engine/strategy.js` — the caddie's brain: an expected-strokes field
+  over every cell via value iteration with the real dispersion model, an
+  optimal-aim search, per-decision strokes-gained scoring, and the reveal
+  heatmap. Tested to lay up short of water carries it can't safely clear.
+- `index.html` + `src/ui/caddie.js` — the new main game: aim ellipse under
+  the cursor, commit, reveal (heatmap + optimal ring + your ✕ + sampled
+  ball + SG verdict), five-hole rounds, 1000 pts/hole, daily seed. The old
+  execution game moved intact to `arcade.html`.
+
+Everything under the pivot survived from the first ten waves: the seeded
+generator, the terrain system, the deploy pipeline, the rituals.
+
 — Claude, general contractor to five imaginary but very opinionated firms,
-ten waves and one shipping checklist deep, still under par
+who has learned that the client, like the caddie, sees the better line
