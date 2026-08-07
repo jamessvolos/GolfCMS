@@ -72,15 +72,51 @@ The auto-screener validates policies too: it samples 200 starts per candidate an
 
 ## 7. Feature Roadmap — Five Waves
 
-**Wave 1 — Deterministic Core (weeks 1–4).** `@golfcms/sim` fixed-point physics with golden replay tests across Chrome/Safari/Node; minimal Phaser client (aim, power, shoot, hole-out); course JSON schema v1; generator v0 (terrain + cup + walls + sand from a ParameterSet); CLI to roll seeds and play them locally. *Exit criterion: same seed + same inputs = identical stroke count on three platforms.*
+### Wave 1 — Deterministic Core (weeks 1–4)
 
-**Wave 2 — The CMS Spine (weeks 5–9).** Postgres schema for all §4 entities; Fastify API; admin UI with ParameterSet slider editor, batch-generate button, review queue with embedded playable preview and ghost-solver overlay; curation state machine with roles; publish-to-CDN snapshot pipeline; solver v1 auto-screening. *Exit: a curator ships a 9-puzzle Collection end-to-end without touching a terminal.*
+- `@golfcms/sim`: fixed-point, fixed-timestep physics package with golden replay tests running in CI on Chrome, Safari (WebKit), and Node.
+- Minimal Phaser client: aim, power meter, shoot, hole-out, stroke counter.
+- Course JSON schema v1 (surfaces, walls, hazards, cup, tee zones) with schema versioning from day one.
+- Generator v0: terrain + cup + walls + sand emitted from a ParameterSet.
+- CLI tooling: `golfcms roll --preset beginner --count 20` to generate seeds and play them locally.
+- *Exit criterion: same seed + same input stream = identical stroke count on all three platforms.*
 
-**Wave 3 — Players & Share Codes (weeks 10–14).** Public play site with Daily Collection; anonymous-first accounts; BallStartPolicy engine (zone + fixed policies) live; share codes minting/redeeming with OG-image previews of the course; AttemptRecord ingestion; basic anti-cheat via server-side replay verification. *Exit: a player beats the Daily, shares a code, and a friend replays the identical course + ball start.*
+### Wave 2 — The CMS Spine (weeks 5–9)
 
-**Wave 4 — Analytics & Calibrated Difficulty (weeks 15–19).** Difficulty dashboard: predicted vs. actual strokes, quit-rate funnels, per-puzzle heatmaps of where balls die; DifficultyProfile correction model (isotonic regression from solver score → observed median strokes — deliberately simple and inspectable); difficulty-band ball-start policy ships; auto-flagging of miscalibrated live puzzles; A/B parameter experiments ("hazard density 0.3 vs 0.4") with guardrail metrics. *Exit: predicted difficulty within ±0.5 strokes for 80% of new publishes.*
+- Postgres schema and Fastify API for every entity in §4, with audit trails.
+- Admin UI: ParameterSet slider editor rendered from JSON Schema, batch-generate button, live candidate count.
+- Review queue with embedded playable preview and ghost-solver overlay; structured rejection reasons.
+- Curation state machine with Designer/Curator/Publisher roles and the two-person publish rule.
+- Publish-to-CDN immutable snapshot pipeline; solver v1 auto-screening with hard-reject rules.
+- *Exit: a curator ships a 9-puzzle Collection end-to-end without touching a terminal.*
 
-**Wave 5 — Scale & Live-Ops (weeks 20–26).** Auto-publish (calibrated puzzles only) into an Endless mode; themed seasonal ParameterSet presets with scheduled takeovers; curator productivity tooling (bulk actions, similarity-dedup via course-geometry embeddings); import/export: puzzle packs as signed `.golfpack` bundles for partner distribution and backup; public read-only API for community leaderboard sites; multi-tenant groundwork so the CMS can white-label to other studios — the CMS itself becomes a sellable product. *Exit: 500 published puzzles, <2 curator-hours/day to sustain the Daily + Endless.*
+### Wave 3 — Players & Share Codes (weeks 10–14)
+
+- Public play site serving the Daily Collection; anonymous-first accounts with optional upgrade.
+- BallStartPolicy engine live with zone and fixed policies; per-play seeded sampling.
+- Share codes: minting, redemption, expiry, attribution counters, OG-image course previews for link unfurls.
+- AttemptRecord ingestion pipeline with replay hashes.
+- Anti-cheat v1: server-side replay verification of submitted input streams against the shared sim.
+- *Exit: a player beats the Daily, shares a code, and a friend replays the identical course and ball start.*
+
+### Wave 4 — Analytics & Calibrated Difficulty (weeks 15–19)
+
+- Difficulty dashboard: predicted vs. actual stroke distributions, quit-rate funnels, per-puzzle heatmaps of where balls die.
+- DifficultyProfile correction model: isotonic regression from solver score to observed median strokes — deliberately simple and inspectable, no black boxes in the curation loop.
+- Difficulty-band ball-start policy ships (the flagship: same course, tuned challenge from any spawn).
+- Auto-flagging of miscalibrated or high-quit live puzzles into a retirement review queue.
+- A/B parameter experiments ("hazard density 0.3 vs 0.4") with guardrail metrics and automatic stop rules.
+- *Exit: predicted difficulty within ±0.5 strokes of observed median for 80% of new publishes.*
+
+### Wave 5 — Scale & Live-Ops (weeks 20–26)
+
+- Auto-publish for calibrated puzzles only, restricted to the low-stakes Endless collection.
+- Seasonal ParameterSet presets with scheduled takeovers (holiday themes as content, not code deploys).
+- Curator productivity tooling: bulk actions, keyboard-driven review, similarity dedup via course-geometry embeddings.
+- Import/export: signed `.golfpack` bundles for partner distribution, backup, and cross-environment promotion.
+- Public read-only API for community leaderboard and stats sites.
+- Multi-tenant groundwork so GolfCMS can white-label to other studios — the CMS itself becomes a sellable product.
+- *Exit: 500 published puzzles; under 2 curator-hours/day sustains the Daily + Endless.*
 
 ## 8. Risks (and our mitigations)
 
@@ -91,6 +127,13 @@ The auto-screener validates policies too: it samples 200 starts per candidate an
 5. **Random starts feel unfair.** A player spawns in a brutal spot on the Daily and screenshots it angrily. *Mitigation:* difficulty-band policy for all competitive collections; fixed-start mode for tournaments; every complaint is replayable from its share code, so support can verify in seconds.
 6. **Scope gravity toward "just make the game prettier."** The bake-off's other firms will pitch shaders. *Mitigation:* our contract structure ties payment to content-pipeline exit criteria per wave; the renderer stays deliberately thin until the pipeline sustains itself.
 7. **Anti-cheat arms race.** Client-submitted scores are forgeable. *Mitigation:* server-side replay verification of the input stream against the shared sim (cheap because the sim is deterministic — risk 1's mitigation pays twice).
+
+## 9. How We Measure Success
+
+- **Content throughput:** candidates generated per curator-hour of review; target 10:1 approved-to-effort improvement by Wave 5 vs. Wave 2 baseline.
+- **Calibration:** the ±0.5-stroke prediction target above, tracked weekly per generator version.
+- **Virality:** share-code redemption rate (codes redeemed / codes minted); every Daily should mint codes measured in percent of players, not fractions of one.
+- **Trust:** zero unsolvable puzzles ever reaching a published Collection — the auto-screener makes this a testable invariant, not an aspiration.
 
 ---
 
