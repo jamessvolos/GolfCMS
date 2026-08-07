@@ -102,5 +102,31 @@ ISO-week edge cases. New browser-verified screenshots live in
 determinism guarantee: certificates computed in Node replayed identically
 through the live page in Chromium.
 
+## 6. Addendum — the ship-it batch (all seven roadmap items)
+
+After ten waves the client said "all seven" to the roadmap, so:
+
+1. **Merged** — PR #1 landed the ten waves on `main`.
+2. **Hosted** — a GitHub Pages workflow deploys the static site from `main`
+   on every push (`.github/workflows/pages.yml`).
+3. **Blind A/B gate** — six hand-authored holes (`src/engine/authored.js`,
+   ASCII string-art format) shuffled against six generated ones in
+   `ab.html`; the page scores TopoGolf's bake-off exit criterion directly:
+   % of generated holes misidentified as authored, target ≥45%.
+4. **Difficulty calibration** — 1–5★ ratings estimated from each
+   certificate (`src/engine/difficulty.js`), recorded with every round, and
+   calibrated against the player's own history: the result toast will tell
+   you a band "plays harder than rated for you" once it has evidence.
+5. **Leaderboard service** — `server/leaderboard.js`, node:http only,
+   strictly optional. Scores are ghost replays; the server re-simulates
+   every submission and ignores client-claimed stroke counts, so a forged
+   score is structurally impossible, not just discouraged.
+6. **Creator mode** — `editor.html` paints terrain over any generated hole;
+   the solver certifies the edit before it can be shared as a seed+patch
+   URL (4 hex chars per changed tile, tee and cup immutable).
+7. **Sound** — fully synthesized Web Audio (`src/ui/sound.js`): power-scaled
+   thwocks, splashes, sand thuds, ice shimmer, hole chimes, an ace fanfare.
+   No asset files, mute persisted.
+
 — Claude, general contractor to five imaginary but very opinionated firms,
-now ten waves deep and still under par
+ten waves and one shipping checklist deep, still under par

@@ -6,9 +6,15 @@ import { BIOMES } from '../engine/generate.js';
 import { makeRound, scorecard } from '../engine/round.js';
 import { encodeReplay, decodeReplay, ghostPath, quantizeAngle } from '../engine/replay.js';
 import { makeGauntlet } from '../engine/gauntlet.js';
-import { createGame, applyShot, undoShot } from '../engine/game.js';
+import { generateCourse } from '../engine/generate.js';
+import { decodePatch, applyPatch } from '../engine/patch.js';
+import { solve } from '../engine/solver.js';
+import { estimateStars, starLabel, calibration } from '../engine/difficulty.js';
+import { initSound, play, setMuted, isMuted } from './sound.js';
+import { applyShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
+import { SAND, ICE, slopeDir } from '../engine/terrain.js';
 import { draw, TILE } from './render.js';
 import { recordRound, dailyStreak, summary } from '../engine/stats.js';
 
@@ -36,6 +42,27 @@ let aim = null;
 let isDaily = false;
 let recorded = false;
 let round = null; // {data, index, strokes[]} while a 9-hole round is live
+
+/** Build game state directly from the puzzle's course, so patched (creator
+ *  mode) courses survive both play and undo without regeneration. */
+function freshGame(p) {
+  return {
+    course: p.course,
+    start: { ...p.start },
+    ball: { ...p.start },
+    strokes: 0,
+    holed: false,
+    history: [],
+  };
+}
+
+/** Undo by replaying all but the last shot against the same course. */
+function rewindOne(g) {
+  if (g.history.length === 0) return g;
+  let fresh = freshGame({ course: g.course, start: g.start });
+  for (const entry of g.history.slice(0, -1)) fresh = applyShot(fresh, entry.shot);
+  return fresh;
+}
 let ghost = null; // {positions, index, holed, strokes} while racing a replay
 let anim = null; // {from, to, t0} while the ball is in flight
 
@@ -61,8 +88,29 @@ function loadFromHash() {
   if (holeMatch) {
     const difficulty = DIFFICULTIES.includes(holeMatch[2]) ? holeMatch[2] : 'standard';
     const biome = BIOMES.includes(holeMatch[3]) ? holeMatch[3] : 'classic';
+    const params = new URLSearchParams(query ?? '');
+    const patchStr = params.get('p');
+    if (patchStr) {
+      // Creator-mode hole: generated base + author's patch, par recomputed.
+      try {
+        const seed = Number(holeMatch[1]) >>> 0;
+        const course = applyPatch(generateCourse(seed, biome), decodePatch(patchStr));
+        const solved = solve(course, course.tee);
+        startPuzzle({
+          seed, difficulty: 'standard', biome, course,
+          start: { ...course.tee },
+          par: solved ? solved.strokes : 0,
+          certificate: solved ?? { strokes: 0, line: [] },
+          custom: true,
+        }, false);
+        meta.textContent = `Custom hole · seed ${seed} · ${biome} · par ${solved ? solved.strokes : '?'}`;
+      } catch {
+        startPuzzle(makePuzzle(Number(holeMatch[1]) >>> 0, difficulty, biome), false);
+      }
+      return;
+    }
     startPuzzle(makePuzzle(Number(holeMatch[1]) >>> 0, difficulty, biome), false);
-    const g = new URLSearchParams(query ?? '').get('g');
+    const g = params.get('g');
     if (g) {
       try {
         ghost = { ...ghostPath(puzzle.course, puzzle.start, decodeReplay(g)), index: 0 };
@@ -89,7 +137,7 @@ function loadRoundHole() {
   isDaily = false;
   ghost = null;
   anim = null;
-  game = createGame(p.seed, p.start, p.biome);
+  game = freshGame(p);
   aim = null;
   recorded = false;
   toast.classList.remove('show');
@@ -107,7 +155,7 @@ function startPuzzle(p, daily) {
   anim = null;
   puzzle = p;
   isDaily = daily;
-  game = createGame(p.seed, p.start, p.biome);
+  game = freshGame(p);
   aim = null;
   recorded = false;
   toast.classList.remove('show');
@@ -115,7 +163,8 @@ function startPuzzle(p, daily) {
     ? `Daily hole #${dailyNumber()}`
     : `Hole seed ${p.seed} · ${p.difficulty}`;
   const biomeTag = p.biome && p.biome !== 'classic' ? ` · ${p.biome}` : '';
-  meta.textContent = `${label} · ${p.course.archetype}${biomeTag} · par ${p.par}`;
+  const stars = p.custom ? '' : ` · ${starLabel(estimateStars(p))}`;
+  meta.textContent = `${label} · ${p.course.archetype}${biomeTag} · par ${p.par}${stars}`;
   if (!daily) {
     const path = `#/hole/${p.seed}/${p.difficulty}/${p.biome ?? 'classic'}`;
     // Preserve a ?g= ghost param if the hash already points at this hole.
@@ -134,11 +183,22 @@ function refresh() {
 
 /** Apply a shot, advance any ghost, and animate the ball to its new lie. */
 function takeShot(shot) {
+  initSound();
   const from = { ...game.ball };
   game = applyShot(game, shot);
   aim = null;
   if (ghost && ghost.index < ghost.positions.length - 1) ghost.index++;
   const to = game.ball;
+  play('swing', { power: shot.power });
+  const event = game.history[game.history.length - 1]?.event;
+  const lie = cellAt(puzzle.course, to.x, to.y);
+  setTimeout(() => {
+    if (event === 'water' || event === 'out-of-bounds') play('splash');
+    else if (game.holed) play(game.strokes === 1 ? 'ace' : 'holed');
+    else if (lie === SAND) play('thud');
+    else if (lie === ICE || slopeDir(lie)) play('slide');
+    else play('bounce');
+  }, 240);
   if (to.x !== from.x || to.y !== from.y) {
     anim = { from, to, t0: performance.now() };
     requestAnimationFrame(stepAnim);
@@ -261,6 +321,7 @@ function showResult() {
     recorded = true;
     localStorage.setItem(ROUNDS_KEY, JSON.stringify(recordRound(loadRounds(), {
       date: today, seed: puzzle.seed, strokes: game.strokes, par: puzzle.par, daily: isDaily,
+      stars: puzzle.custom ? undefined : estimateStars(puzzle),
     })));
     if (round) round.strokes[round.index] = game.strokes;
   }
@@ -293,12 +354,40 @@ function showResult() {
     ? game.strokes < ghost.strokes ? ' · 👻 ghost beaten!'
       : game.strokes === ghost.strokes ? ' · 👻 tied the ghost' : ' · 👻 the ghost wins'
     : '';
+  const cal = puzzle.custom ? { verdict: '' } : calibration(rounds, estimateStars(puzzle));
   toast.querySelector('.big').textContent = scoreWord(game.strokes, puzzle.par);
   toast.querySelector('.sub').textContent =
     `${game.strokes} strokes on a par ${puzzle.par}` + race +
     (streak > 0 ? ` · 🔥 ${streak}-day streak` : '') +
-    ` · ${s.rounds} rounds, avg ${s.avgVsPar >= 0 ? '+' : ''}${s.avgVsPar} vs par`;
+    ` · ${s.rounds} rounds, avg ${s.avgVsPar >= 0 ? '+' : ''}${s.avgVsPar} vs par` +
+    (cal.verdict ? ` · ${starLabel(estimateStars(puzzle))} ${cal.verdict}` : '');
   toast.classList.add('show');
+  submitToLeaderboard();
+}
+
+/** Optional leaderboard: only speaks up if the player configured a server.
+ *  The game never depends on it — failures are silent. */
+async function submitToLeaderboard() {
+  const url = localStorage.getItem('golfcms.leaderboard.url');
+  if (!url || puzzle.custom || !game.holed) return;
+  try {
+    const res = await fetch(`${url.replace(/\/$/, '')}/scores`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        seed: puzzle.seed,
+        difficulty: puzzle.difficulty,
+        biome: puzzle.biome ?? 'classic',
+        name: localStorage.getItem('golfcms.player.name') ?? 'anon',
+        replay: encodeReplay(game.history.map((h) => h.shot)),
+      }),
+    });
+    if (!res.ok) return;
+    const { rank, of } = await res.json();
+    toast.querySelector('.sub').textContent += ` · 🏆 rank ${rank}/${of}`;
+  } catch {
+    // leaderboard unreachable: the game shrugs and carries on
+  }
 }
 
 document.getElementById('toast-challenge').addEventListener('click', () => {
@@ -312,7 +401,7 @@ document.getElementById('toast-share').addEventListener('click', () => {
   navigator.clipboard?.writeText(resultText(game, puzzle, isDaily) + '\n' + location.href);
 });
 document.getElementById('undo').addEventListener('click', () => {
-  game = undoShot(game);
+  game = rewindOne(game);
   if (ghost) ghost.index = Math.max(0, ghost.index - 1);
   toast.classList.remove('show');
   refresh();
@@ -398,6 +487,13 @@ window.addEventListener('keydown', (e) => {
   }
   e.preventDefault();
   refresh();
+});
+
+const muteBtn = document.getElementById('mute');
+muteBtn.textContent = isMuted() ? '🔇' : '🔊';
+muteBtn.addEventListener('click', () => {
+  setMuted(!isMuted());
+  muteBtn.textContent = isMuted() ? '🔇' : '🔊';
 });
 
 window.addEventListener('hashchange', loadFromHash);
