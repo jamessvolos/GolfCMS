@@ -3,6 +3,7 @@
 
 import { makePuzzle, dailyPuzzle, dailyNumber, DIFFICULTIES } from '../engine/puzzle.js';
 import { BIOMES } from '../engine/generate.js';
+import { makeRound, scorecard } from '../engine/round.js';
 import { createGame, applyShot, undoShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
@@ -32,9 +33,19 @@ let power = 2;
 let aim = null;
 let isDaily = false;
 let recorded = false;
+let round = null; // {data, index, strokes[]} while a 9-hole round is live
 
 function loadFromHash() {
   const h = location.hash;
+  const roundMatch = h.match(/^#\/round\/(\d+)(?:\/(\w+))?/);
+  if (roundMatch) {
+    const seed = Number(roundMatch[1]) >>> 0;
+    const biome = BIOMES.includes(roundMatch[2]) ? roundMatch[2] : 'classic';
+    if (round && round.data.seed === seed && round.data.biome === biome) return;
+    startRound(seed, biome);
+    return;
+  }
+  round = null;
   const holeMatch = h.match(/^#\/hole\/(\d+)(?:\/(\w+))?(?:\/(\w+))?/);
   if (holeMatch) {
     const difficulty = DIFFICULTIES.includes(holeMatch[2]) ? holeMatch[2] : 'standard';
@@ -45,7 +56,29 @@ function loadFromHash() {
   }
 }
 
+function startRound(seed, biome) {
+  round = { data: makeRound(seed, biome), index: 0, strokes: [] };
+  location.hash = `#/round/${seed}/${biome}`;
+  loadRoundHole();
+}
+
+function loadRoundHole() {
+  const p = round.data.holes[round.index];
+  puzzle = p;
+  isDaily = false;
+  game = createGame(p.seed, p.start, p.biome);
+  aim = null;
+  recorded = false;
+  toast.classList.remove('show');
+  const biomeTag = p.biome !== 'classic' ? ` · ${p.biome}` : '';
+  meta.textContent =
+    `Round ${round.data.seed} · hole ${round.index + 1}/9 · ${p.course.archetype}${biomeTag}` +
+    ` · par ${p.par} · course par ${round.data.totalPar}`;
+  refresh();
+}
+
 function startPuzzle(p, daily) {
+  round = null;
   puzzle = p;
   isDaily = daily;
   game = createGame(p.seed, p.start, p.biome);
@@ -63,6 +96,7 @@ function startPuzzle(p, daily) {
 
 function refresh() {
   window.__game = game; // debug/test hook: read-only view of live state
+  window.__debugShot = (shot) => { game = applyShot(game, shot); refresh(); };
   updateHud();
   draw(ctx, puzzle.course, game, aim);
   if (game.holed) showResult();
@@ -83,7 +117,7 @@ function updateHud() {
   for (const b of document.querySelectorAll('[data-power]')) {
     b.classList.toggle('active', Number(b.dataset.power) === power);
   }
-  document.getElementById('undo').disabled = game.history.length === 0;
+  document.getElementById('undo').disabled = game.history.length === 0 || game.holed;
 }
 
 /** Nominal landing band: aim line reach plus the club's scatter width. */
@@ -137,6 +171,18 @@ function scoreWord(strokes, par) {
 }
 
 export function resultText(g, p, daily) {
+  if (round) {
+    const card = scorecard(round.data, round.strokes);
+    const vs = card.vsPar >= 0 ? `+${card.vsPar}` : `${card.vsPar}`;
+    const holes = card.entries
+      .filter((e) => e.strokes !== null)
+      .map((e) => {
+        const d = e.strokes - e.par;
+        return e.strokes === 1 ? '🎯' : d <= -2 ? '🦅' : d === -1 ? '🐦' : d === 0 ? '🟢' : d === 1 ? '🟨' : '🟥';
+      })
+      .join('');
+    return `Daily Links round ${round.data.seed} — ${card.totalStrokes}/${round.data.totalPar} (${vs}) ${holes}`;
+  }
   const trail = g.history.map((h) => (
     { holed: '⛳', water: '🟦', 'out-of-bounds': '🟥', trees: '🌲' }[h.event] ??
     { 2: '🟨', 1: '🟩' }[cellAt(p.course, h.ball.x, h.ball.y)] ?? '🟩'
@@ -153,7 +199,29 @@ function showResult() {
     localStorage.setItem(ROUNDS_KEY, JSON.stringify(recordRound(loadRounds(), {
       date: today, seed: puzzle.seed, strokes: game.strokes, par: puzzle.par, daily: isDaily,
     })));
+    if (round) round.strokes[round.index] = game.strokes;
   }
+  const nextBtn = document.getElementById('toast-next');
+  if (round) {
+    const card = scorecard(round.data, round.strokes);
+    const vs = card.vsPar >= 0 ? `+${card.vsPar}` : `${card.vsPar}`;
+    if (!card.complete) {
+      toast.querySelector('.big').textContent = scoreWord(game.strokes, puzzle.par);
+      toast.querySelector('.sub').textContent =
+        `Hole ${round.index + 1} done · ${card.totalStrokes} strokes through ` +
+        `${round.index + 1} (${vs})`;
+      nextBtn.hidden = false;
+    } else {
+      toast.querySelector('.big').textContent =
+        card.vsPar < 0 ? 'Under par round!' : card.vsPar === 0 ? 'Even par round.' : 'Round complete.';
+      toast.querySelector('.sub').textContent =
+        `${card.totalStrokes} strokes on a par-${round.data.totalPar} course (${vs})`;
+      nextBtn.hidden = true;
+    }
+    toast.classList.add('show');
+    return;
+  }
+  nextBtn.hidden = true;
   const rounds = loadRounds();
   const streak = dailyStreak(rounds, today);
   const s = summary(rounds);
@@ -176,6 +244,14 @@ document.getElementById('undo').addEventListener('click', () => {
 document.getElementById('new').addEventListener('click', () => {
   const biome = document.getElementById('biome').value;
   startPuzzle(makePuzzle((Math.random() * 0xffffffff) >>> 0, 'standard', biome), false);
+});
+document.getElementById('newround').addEventListener('click', () => {
+  startRound((Math.random() * 0xffffffff) >>> 0, document.getElementById('biome').value);
+});
+document.getElementById('toast-next').addEventListener('click', () => {
+  if (!round) return;
+  round.index++;
+  loadRoundHole();
 });
 document.getElementById('daily').addEventListener('click', () => {
   location.hash = '';

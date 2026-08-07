@@ -51,7 +51,12 @@
 <div id="meta">loading…</div>
 <div id="wrap">
   <canvas id="course" width="960" height="576"></canvas>
-  <div id="toast"><div class="big"></div><div class="sub"></div><button id="toast-share">Copy result</button></div>
+  <div id="toast"><div class="big"></div><div class="sub"></div>
+    <div style="display:flex;gap:8px">
+      <button id="toast-share">Copy result</button>
+      <button id="toast-next" hidden>Next hole ⛳</button>
+    </div>
+  </div>
 </div>
 <div id="hud">
   <span id="score">Par – · Strokes 0</span>
@@ -75,6 +80,7 @@
       <option value="alpine">alpine ⛰️</option>
     </select>
     <button id="new">New hole</button>
+    <button id="newround">New round</button>
     <button id="share">Share link</button>
   </span>
 </div>
