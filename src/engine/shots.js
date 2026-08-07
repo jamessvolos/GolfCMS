@@ -118,9 +118,13 @@ function flyBall(course, ball, dx, dy, range, club, strokeIndex) {
   // Deterministic scatter, perpendicular to the aim line.
   const rng = substream(course.seed, `scatter:${strokeIndex}`);
   const s = club.scatter === 0 ? 0 : randInt(rng, -club.scatter, club.scatter);
+  // Wind drifts airborne shots, scaled by carry — a full driver takes the
+  // whole gust, a short wedge chip barely feels it. Putts are immune.
+  const wind = course.wind ?? { x: 0, y: 0 };
+  const windScale = Math.min(1, range / 10);
   let land = {
-    x: Math.round(ball.x + dx * range - dy * s),
-    y: Math.round(ball.y + dy * range + dx * s),
+    x: Math.round(ball.x + dx * range - dy * s + wind.x * windScale),
+    y: Math.round(ball.y + dy * range + dx * s + wind.y * windScale),
   };
 
   // Low flight is blocked by trees along the arc; the ball drops in front.

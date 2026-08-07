@@ -142,6 +142,35 @@ export function draw(ctx, course, game, aim, opts = {}) {
   ctx.closePath();
   ctx.fill();
 
+  // wind sock (links biome)
+  const wind = course.wind ?? { x: 0, y: 0 };
+  if (wind.x !== 0 || wind.y !== 0) {
+    const cx = ctx.canvas.width - 38;
+    const cy = 30;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 20, 0, Math.PI * 2);
+    ctx.fill();
+    const a = Math.atan2(wind.y, wind.x);
+    const mag = Math.hypot(wind.x, wind.y);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - Math.cos(a) * 10, cy - Math.sin(a) * 10);
+    ctx.lineTo(cx + Math.cos(a) * 10, cy + Math.sin(a) * 10);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * 14, cy + Math.sin(a) * 14);
+    ctx.lineTo(cx + Math.cos(a + 2.6) * 8, cy + Math.sin(a + 2.6) * 8);
+    ctx.lineTo(cx + Math.cos(a - 2.6) * 8, cy + Math.sin(a - 2.6) * 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.font = '10px system-ui';
+    ctx.fillText(String(Math.round(mag)), cx - 3, cy + 32);
+  }
+
   // ball
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = 'rgba(0,0,0,0.4)';

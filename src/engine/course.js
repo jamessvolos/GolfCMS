@@ -24,6 +24,7 @@ export function makeCourse(seed, archetype, genVersion) {
     cells: new Array(WIDTH * HEIGHT).fill(ROUGH),
     tee: { x: 0, y: 0 },
     hole: { x: 0, y: 0 },
+    wind: { x: 0, y: 0 }, // tile drift applied to full-range airborne shots
     seed,
     archetype,
     genVersion,

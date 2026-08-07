@@ -17,7 +17,7 @@ export const ARCHETYPES = ['straight', 'dogleg-left', 'dogleg-right', 'long'];
 // Biomes layer extra terrain over the classic pipeline via their own RNG
 // substreams, so a classic course is byte-identical whether or not biomes
 // exist in the codebase — already-shared seeds are sacred.
-export const BIOMES = ['classic', 'winter', 'alpine'];
+export const BIOMES = ['classic', 'winter', 'alpine', 'links'];
 
 /** @param {number} seed @param {string} [biome] @returns {import('./course.js').Course} */
 export function generateCourse(seed, biome = 'classic') {
@@ -110,8 +110,33 @@ export function generateCourse(seed, biome = 'classic') {
   course.biome = biome;
   if (biome === 'winter') addIce(course);
   else if (biome === 'alpine') addSlopes(course);
+  else if (biome === 'links') makeLinks(course);
 
   return course;
+}
+
+/**
+ * Links: open, windy, treeless ground. Most trees become rough, pot bunkers
+ * dot the margins, and a constant wind bends every airborne shot — the
+ * ground game (putter runs) is the sheltered answer.
+ */
+function makeLinks(course) {
+  const rng = substream(course.seed, 'links');
+  for (let i = 0; i < course.cells.length; i++) {
+    if (course.cells[i] === TREES && rng() < 0.85) course.cells[i] = ROUGH;
+  }
+  const pots = randInt(rng, 3, 6);
+  for (let i = 0; i < pots; i++) {
+    overlayDisc(course, randInt(rng, 4, course.width - 5), randInt(rng, 2, course.height - 3), 1, () => SAND);
+  }
+  const windRng = substream(course.seed, 'wind');
+  const dirs = [
+    { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 },
+    { x: 1, y: 1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: -1, y: -1 },
+  ];
+  const dir = pick(windRng, dirs);
+  const strength = randInt(windRng, 1, 2);
+  course.wind = { x: dir.x * strength, y: dir.y * strength };
 }
 
 /** Winter: frozen patches on the playing surfaces. Ice keeps the ball moving. */
