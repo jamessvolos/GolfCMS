@@ -18,11 +18,28 @@ export function lieParams(terrain) {
   return { maxDist: MAX_CARRY, sigmaScale: 1 }; // fairway, green, ice, slopes
 }
 
+// Handicap profiles: `base` scales the whole pattern; `longExtra` widens it
+// further as carry approaches max — long clubs punish higher handicaps
+// disproportionately, exactly as in real dispersion data. 'scratch' is the
+// identity profile, so everything downstream defaults to today's behavior.
+export const HANDICAPS = [
+  { id: 'tour', label: 'Tour pro', base: 0.75, longExtra: 0 },
+  { id: 'scratch', label: 'Scratch', base: 1, longExtra: 0 },
+  { id: 'ten', label: '10 handicap', base: 1.3, longExtra: 0.3 },
+  { id: 'twenty', label: '20 handicap', base: 1.6, longExtra: 0.6 },
+];
+export const DEFAULT_PROFILE = HANDICAPS[1];
+
+export function handicapById(id) {
+  return HANDICAPS.find((h) => h.id === id) ?? DEFAULT_PROFILE;
+}
+
 /** Ellipse semi-axes (in tiles) for a shot of the given carry distance. */
-export function sigmas(dist, sigmaScale) {
+export function sigmas(dist, sigmaScale, profile = DEFAULT_PROFILE) {
+  const skill = profile.base + profile.longExtra * (dist / MAX_CARRY);
   return {
-    long: (0.5 + dist * 0.09) * sigmaScale,  // depth error grows with club
-    lat: (0.4 + dist * 0.06) * sigmaScale,   // lateral error slightly tighter
+    long: (0.5 + dist * 0.09) * sigmaScale * skill,  // depth error grows with club
+    lat: (0.4 + dist * 0.06) * sigmaScale * skill,   // lateral error slightly tighter
   };
 }
 
@@ -40,13 +57,13 @@ export const UNIT_OFFSETS = (() => {
 })();
 
 /** Landing points for a shot from `from` aimed at `target`, one per offset. */
-export function patternPoints(from, target, sigmaScale, offsets = UNIT_OFFSETS) {
+export function patternPoints(from, target, sigmaScale, offsets = UNIT_OFFSETS, profile = DEFAULT_PROFILE) {
   const dx = target.x - from.x;
   const dy = target.y - from.y;
   const dist = Math.hypot(dx, dy) || 0.001;
   const ux = dx / dist;
   const uy = dy / dist;
-  const s = sigmas(dist, sigmaScale);
+  const s = sigmas(dist, sigmaScale, profile);
   return offsets.map((o) => ({
     x: target.x + ux * o.y * s.long - uy * o.x * s.lat,
     y: target.y + uy * o.y * s.long + ux * o.x * s.lat,
@@ -71,8 +88,8 @@ export const PREVIEW_OFFSETS = (() => {
  * pattern finish (as outcome percentages), the sample dots themselves for
  * rendering, and the median leave to the hole.
  */
-export function patternStats(course, from, target, sigmaScale) {
-  const pts = patternPoints(from, target, sigmaScale, PREVIEW_OFFSETS);
+export function patternStats(course, from, target, sigmaScale, profile = DEFAULT_PROFILE) {
+  const pts = patternPoints(from, target, sigmaScale, PREVIEW_OFFSETS, profile);
   const counts = { fairway: 0, green: 0, rough: 0, sand: 0, trees: 0, wet: 0 };
   const dots = [];
   const leaves = [];
@@ -99,14 +116,14 @@ export function patternStats(course, from, target, sigmaScale) {
 }
 
 /** The one real ball: a seeded gaussian draw from the same ellipse. */
-export function sampleLanding(course, from, target, sigmaScale, strokeIndex) {
+export function sampleLanding(course, from, target, sigmaScale, strokeIndex, profile = DEFAULT_PROFILE) {
   const rng = substream(course.seed, `caddie:${strokeIndex}`);
   const u1 = Math.max(rng(), 1e-9);
   const u2 = rng();
   const mag = Math.sqrt(-2 * Math.log(u1));
   const g1 = mag * Math.cos(2 * Math.PI * u2);
   const g2 = mag * Math.sin(2 * Math.PI * u2);
-  const [p] = patternPoints(from, target, sigmaScale, [{ x: g1, y: g2 }]);
+  const [p] = patternPoints(from, target, sigmaScale, [{ x: g1, y: g2 }], profile);
   return { x: Math.round(p.x), y: Math.round(p.y) };
 }
 
