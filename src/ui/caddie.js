@@ -7,7 +7,7 @@ import { substream } from '../engine/rng.js';
 import { generateCourse } from '../engine/generate.js';
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternPoints, sampleLanding, restingCell, UNIT_OFFSETS } from '../engine/dispersion.js';
+import { lieParams, sigmas, patternStats, sampleLanding, restingCell } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
@@ -73,6 +73,7 @@ function loadHole() {
       `${holeInfo.yds} yds · ${course.archetype}`;
     verdict.textContent =
       `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
+    document.getElementById('pattern').textContent = '';
     refresh();
   }, 30);
 }
@@ -149,6 +150,15 @@ function drawAim() {
   ellipsePath(ball, aimTarget, lie.sigmaScale, 1); ctx.fill();
   ctx.strokeStyle = 'rgba(255, 209, 102, 0.8)';
   ellipsePath(ball, aimTarget, lie.sigmaScale, 1); ctx.stroke();
+  // the pattern itself: 48 sample shots, colored by where they finish
+  const DOT = { fairway: '#ffffff', green: '#b6ffc0', rough: '#2e5230',
+    sand: '#a8813a', trees: '#123a1c', wet: '#ff5c5c' };
+  for (const d of patternStats(course, ball, aimTarget, lie.sigmaScale).dots) {
+    ctx.fillStyle = DOT[d.outcome];
+    ctx.beginPath();
+    ctx.arc((d.x + 0.5) * TILE, (d.y + 0.5) * TILE, d.outcome === 'wet' ? 3.5 : 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
   // carry yardage tag beside the target
   const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
   ctx.font = 'bold 13px system-ui';
@@ -214,6 +224,19 @@ canvas.addEventListener('mousemove', (e) => {
   verdict.textContent =
     `Pin ${yards(toPin(ball))} yds · this target: ${yards(carry)}-yd carry (${clubName(carry)})` +
     (leaves > 1.5 ? ` · leaves ${yards(leaves)} yds in` : ' · going at the flag');
+  const lieHere = lieParams(cellAt(course, ball.x, ball.y));
+  const s = sigmas(carry, lieHere.sigmaScale);
+  const stats = patternStats(course, ball, aimTarget, lieHere.sigmaScale);
+  const parts = [];
+  if (stats.pct.green) parts.push(`<span class="fw">${stats.pct.green}% green</span>`);
+  if (stats.pct.fairway) parts.push(`<span class="fw">${stats.pct.fairway}% fairway</span>`);
+  if (stats.pct.rough) parts.push(`${stats.pct.rough}% rough`);
+  if (stats.pct.sand) parts.push(`${stats.pct.sand}% sand`);
+  if (stats.pct.trees) parts.push(`${stats.pct.trees}% trees`);
+  if (stats.pct.wet) parts.push(`<span class="wet">${stats.pct.wet}% water/OB</span>`);
+  document.getElementById('pattern').innerHTML =
+    `Pattern ${yards(4 * s.lat)} × ${yards(4 * s.long)} yds · ${parts.join(' · ')}` +
+    (stats.medianLeave !== null ? ` · median leave ${yards(stats.medianLeave)} yds` : '');
   refresh();
 });
 
@@ -253,6 +276,14 @@ function commitDecision() {
     `${call} You: E[${score.yourE.toFixed(2)}] strokes · optimal (green ring, ` +
     `${yards(Math.hypot(score.optimal.x - from.x, score.optimal.y - from.y))}-yd carry): ` +
     `E[${score.optimalE.toFixed(2)}] · SG lost ${sg.toFixed(2)} · +${score.points} pts · ${ballNow}`;
+  // risk ledger: your line vs the caddie's, in trouble percentages
+  const trouble = (t) => {
+    const p = patternStats(course, from, t, lie.sigmaScale).pct;
+    return p.wet + p.sand + p.trees;
+  };
+  document.getElementById('pattern').innerHTML =
+    `Risk taken — your line: <span class="wet">${trouble(reveal.your)}%</span> trouble ` +
+    `(water/sand/trees) · caddie's line: <span class="fw">${trouble(score.optimal)}%</span>`;
   refresh();
 }
 
@@ -263,6 +294,7 @@ function advance() {
   reveal = null;
   verdict.textContent =
     `Shot ${strokes + 1}: ${yards(toPin(ball))} yds to the pin — pick your target from this lie.`;
+  document.getElementById('pattern').textContent = '';
   refresh();
 }
 
