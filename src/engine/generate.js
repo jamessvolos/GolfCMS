@@ -19,8 +19,15 @@ export const ARCHETYPES = ['straight', 'dogleg-left', 'dogleg-right', 'long'];
 // exist in the codebase — already-shared seeds are sacred.
 export const BIOMES = ['classic', 'winter', 'alpine', 'links'];
 
-/** @param {number} seed @param {string} [biome] @returns {import('./course.js').Course} */
-export function generateCourse(seed, biome = 'classic') {
+/**
+ * @param {number} seed
+ * @param {string} [biome]
+ * @param {{holeDistTiles?: number}} [opts] optional hole-length override
+ *   (used by Caddie's par-3/4/5 holes). Omitting it reproduces the classic
+ *   full-span hole byte-for-byte — draws happen in the same stream order.
+ * @returns {import('./course.js').Course}
+ */
+export function generateCourse(seed, biome = 'classic', opts = null) {
   const layout = substream(seed, 'layout');
   const hazards = substream(seed, 'hazards');
 
@@ -36,8 +43,17 @@ export function generateCourse(seed, biome = 'classic') {
 
   // Tee on the left edge band, hole on the right edge band.
   const tee = { x: randInt(layout, 1, 3), y: randInt(layout, 6, height - 7) };
-  const holeX = archetype === 'long' ? width - 2 : randInt(layout, width - 6, width - 3);
+  let holeX = archetype === 'long' ? width - 2 : randInt(layout, width - 6, width - 3);
+  if (opts?.holeDistTiles) {
+    holeX = Math.max(8, Math.min(width - 2, tee.x + Math.round(opts.holeDistTiles)));
+  }
   const hole = { x: holeX, y: randInt(layout, 5, height - 6) };
+  if (opts?.holeDistTiles) {
+    // keep short holes short: bound the vertical offset so a par 3 doesn't
+    // secretly play like a par 4 on the diagonal
+    const half = Math.max(3, Math.round(opts.holeDistTiles * 0.35));
+    hole.y = Math.max(5, Math.min(height - 6, Math.max(tee.y - half, Math.min(tee.y + half, hole.y))));
+  }
   course.tee = tee;
   course.hole = hole;
 

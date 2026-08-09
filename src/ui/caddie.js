@@ -10,6 +10,8 @@ import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
 import { lieParams, sigmas, patternPoints, sampleLanding, restingCell, UNIT_OFFSETS } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
+import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
+import { pickWeighted, randInt } from '../engine/rng.js';
 import { terrainColor, TILE } from './render.js';
 
 const HOLES_PER_ROUND = 5;
@@ -29,6 +31,9 @@ let decisions = [];
 let phase = 'loading'; // aim | reveal | loading | holeover
 let aimTarget = null;
 let reveal = null; // {your, optimal, score, heat, landing}
+let holeInfo = null; // {par, yds} for the current hole
+
+const toPin = (p) => dist(p, course.hole);
 
 function startRound(seed, daily) {
   round = { seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0 };
@@ -48,7 +53,13 @@ function loadHole() {
   overlay.classList.remove('show');
   meta.textContent = `Hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · the caddie is reading the hole…`;
   setTimeout(() => {
-    course = generateCourse(holeSeed(round.holeIndex));
+    const seed = holeSeed(round.holeIndex);
+    // draw this hole's length from the par-3/4/5 menu, seeded per hole
+    const lenRng = substream(seed, 'yardage');
+    const band = pickWeighted(lenRng, HOLE_LENGTHS.map((b) => [b, b.weight]));
+    course = generateCourse(seed, 'classic', { holeDistTiles: randInt(lenRng, band.min, band.max) });
+    const lengthTiles = dist(course.tee, course.hole);
+    holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course);
     ball = { ...course.tee };
     strokes = 0;
@@ -57,8 +68,11 @@ function loadHole() {
     reveal = null;
     phase = 'aim';
     const label = round.daily ? `Daily #${dailyNumber()}` : `Round ${round.seed}`;
-    meta.textContent = `${label} · hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · ${course.archetype} · pick your tee-shot target`;
-    verdict.textContent = 'Place your target. The ellipse is where this shot actually lands from this lie.';
+    meta.textContent =
+      `${label} · hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · par ${holeInfo.par} · ` +
+      `${holeInfo.yds} yds · ${course.archetype}`;
+    verdict.textContent =
+      `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
     refresh();
   }, 30);
 }
@@ -69,8 +83,8 @@ function refresh() {
   if (phase === 'reveal' && reveal) drawReveal();
   const pts = decisions.reduce((s, d) => s + d.points, 0);
   scoreEl.textContent =
-    `Hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · Shot ${strokes + 1} · ` +
-    `${round.totalPoints + pts} pts`;
+    `Hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} (par ${holeInfo.par}, ${holeInfo.yds} yds) · ` +
+    `Shot ${strokes + 1} · ${yards(toPin(ball))} yds out · ${round.totalPoints + pts} pts`;
   document.getElementById('commit').hidden = phase !== 'reveal';
 }
 
@@ -135,6 +149,18 @@ function drawAim() {
   ellipsePath(ball, aimTarget, lie.sigmaScale, 1); ctx.fill();
   ctx.strokeStyle = 'rgba(255, 209, 102, 0.8)';
   ellipsePath(ball, aimTarget, lie.sigmaScale, 1); ctx.stroke();
+  // carry yardage tag beside the target
+  const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
+  ctx.font = 'bold 13px system-ui';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 3;
+  const label = `${yards(carry)}y`;
+  const lx = (aimTarget.x + 0.5) * TILE + 12;
+  const ly = (aimTarget.y + 0.5) * TILE - 10;
+  ctx.strokeText(label, lx, ly);
+  ctx.fillText(label, lx, ly);
+  ctx.lineWidth = 1;
 }
 
 function drawReveal() {
@@ -183,6 +209,11 @@ canvas.addEventListener('mousemove', (e) => {
     x: Math.round(ball.x + (x - ball.x) * clamp),
     y: Math.round(ball.y + (y - ball.y) * clamp),
   };
+  const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
+  const leaves = toPin(aimTarget);
+  verdict.textContent =
+    `Pin ${yards(toPin(ball))} yds · this target: ${yards(carry)}-yd carry (${clubName(carry)})` +
+    (leaves > 1.5 ? ` · leaves ${yards(leaves)} yds in` : ' · going at the flag');
   refresh();
 });
 
@@ -217,10 +248,11 @@ function commitDecision() {
     : sg < 0.08 ? 'Good call — within a whisker of optimal.'
     : sg < 0.2 ? 'Playable, but the caddie sees a better line.'
     : 'That aim burns real strokes.';
+  const ballNow = rest.kind === 'rest' ? `ball ${yards(toPin(ball))} yds out` : outcome;
   verdict.textContent =
-    `${call} Your target: E[${score.yourE.toFixed(2)}] strokes · optimal (green ring): ` +
-    `E[${score.optimalE.toFixed(2)}] · SG lost ${sg.toFixed(2)} · +${score.points} pts` +
-    (outcome !== 'landed' ? ` · ball: ${outcome}` : '');
+    `${call} You: E[${score.yourE.toFixed(2)}] strokes · optimal (green ring, ` +
+    `${yards(Math.hypot(score.optimal.x - from.x, score.optimal.y - from.y))}-yd carry): ` +
+    `E[${score.optimalE.toFixed(2)}] · SG lost ${sg.toFixed(2)} · +${score.points} pts · ${ballNow}`;
   refresh();
 }
 
@@ -229,7 +261,8 @@ function advance() {
   phase = 'aim';
   aimTarget = null;
   reveal = null;
-  verdict.textContent = `Shot ${strokes + 1}: pick your approach target from this lie.`;
+  verdict.textContent =
+    `Shot ${strokes + 1}: ${yards(toPin(ball))} yds to the pin — pick your target from this lie.`;
   refresh();
 }
 
@@ -243,9 +276,12 @@ function finishHole() {
   overlay.querySelector('.big').textContent = done
     ? `Round: ${round.totalPoints} / ${HOLES_PER_ROUND * 1000}`
     : `Hole ${round.holeIndex + 1}: ${holePts} / 1000`;
+  const est = (strokes + putts).toFixed(1);
+  const vsPar = (strokes + putts - holeInfo.par).toFixed(1);
   overlay.querySelector('.sub').textContent = done
     ? `Decision quality across ${HOLES_PER_ROUND} holes — ` + roundGrade(round.totalPoints)
-    : `${decisions.length} decisions · est. ${(strokes + putts).toFixed(1)} strokes with the putts`;
+    : `${decisions.length} decisions · est. ${est} strokes on the par-${holeInfo.par} ` +
+      `${holeInfo.yds}-yarder (${vsPar >= 0 ? '+' : ''}${vsPar})`;
   document.getElementById('ov-next').textContent = done ? 'New round' : 'Next hole ⛳';
   overlay.classList.add('show');
 }
