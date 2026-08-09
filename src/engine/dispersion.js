@@ -53,6 +53,51 @@ export function patternPoints(from, target, sigmaScale, offsets = UNIT_OFFSETS) 
   }));
 }
 
+// Denser fixed offset set for live pattern visualization and outcome odds —
+// 48 points gives ~2% probability granularity while staying deterministic.
+export const PREVIEW_OFFSETS = (() => {
+  const pts = [];
+  const GA = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < 48; i++) {
+    const r = Math.sqrt((i + 0.5) / 48) * 1.9;
+    const a = i * GA + 0.7;
+    pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+  }
+  return pts;
+})();
+
+/**
+ * Live pattern intelligence for a candidate target: where the shots in this
+ * pattern finish (as outcome percentages), the sample dots themselves for
+ * rendering, and the median leave to the hole.
+ */
+export function patternStats(course, from, target, sigmaScale) {
+  const pts = patternPoints(from, target, sigmaScale, PREVIEW_OFFSETS);
+  const counts = { fairway: 0, green: 0, rough: 0, sand: 0, trees: 0, wet: 0 };
+  const dots = [];
+  const leaves = [];
+  for (const p of pts) {
+    const rest = restingCell(course, p.x, p.y);
+    if (rest.kind !== 'rest') {
+      counts.wet++;
+      dots.push({ x: p.x, y: p.y, outcome: 'wet' });
+      continue;
+    }
+    leaves.push(Math.hypot(rest.x - course.hole.x, rest.y - course.hole.y));
+    const t = rest.terrain;
+    const outcome =
+      t === GREEN ? 'green' : t === SAND ? 'sand' : t === ROUGH ? 'rough'
+      : t === TREES ? 'trees' : 'fairway'; // ice/slopes count as fairway-ish
+    counts[outcome]++;
+    dots.push({ x: p.x, y: p.y, outcome });
+  }
+  const pct = {};
+  for (const k of Object.keys(counts)) pct[k] = Math.round((counts[k] / pts.length) * 100);
+  leaves.sort((a, b) => a - b);
+  const medianLeave = leaves.length ? leaves[Math.floor(leaves.length / 2)] : null;
+  return { pct, dots, medianLeave };
+}
+
 /** The one real ball: a seeded gaussian draw from the same ellipse. */
 export function sampleLanding(course, from, target, sigmaScale, strokeIndex) {
   const rng = substream(course.seed, `caddie:${strokeIndex}`);

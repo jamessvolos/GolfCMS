@@ -32,6 +32,9 @@
   button:hover { background: #2c5940; }
   #score { font-weight: 600; }
   #verdict { color: var(--accent); min-height: 1.4em; font-size: 14px; max-width: 960px; text-align: center; margin-top: 8px; }
+  #pattern { color: var(--dim); min-height: 1.4em; font-size: 13px; max-width: 960px; text-align: center; }
+  #pattern .wet { color: var(--bad); font-weight: 600; }
+  #pattern .fw { color: var(--accent2); }
   #overlay {
     position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
     background: rgba(10, 20, 14, 0.75); border-radius: 10px; flex-direction: column; gap: 10px; text-align: center; padding: 20px;
@@ -52,6 +55,7 @@
   </div>
 </div>
 <div id="verdict">Move the mouse to place your target — the ellipse is your real shot pattern. Click to commit.</div>
+<div id="pattern"></div>
 <div id="hud">
   <span id="score">Hole – · Shot – · 0 pts</span>
   <button id="commit" hidden>Play on ➜</button>
