@@ -179,9 +179,10 @@ export function renderCourseArt(course) {
   return off;
 }
 
-export function drawFlag(ctx, hole) {
-  const hx = (hole.x + 0.5) * TILE;
-  const hy = (hole.y + 0.5) * TILE;
+/** Flag sprite at a SCREEN-pixel anchor (stays upright under map rotation). */
+export function drawFlag(ctx, px) {
+  const hx = px.x;
+  const hy = px.y;
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath(); ctx.ellipse(hx + 2, hy + 2, 6, 3, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = '#14231a';
@@ -199,9 +200,10 @@ export function drawFlag(ctx, hole) {
   ctx.fill();
 }
 
-export function drawBall(ctx, pos, { ghost = false } = {}) {
-  const bx = (pos.x + 0.5) * TILE;
-  const by = (pos.y + 0.5) * TILE;
+/** Ball sprite at a SCREEN-pixel anchor. */
+export function drawBall(ctx, px, { ghost = false } = {}) {
+  const bx = px.x;
+  const by = px.y;
   if (!ghost) {
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath(); ctx.ellipse(bx + 2, by + 3, 6, 3, 0, 0, Math.PI * 2); ctx.fill();
@@ -219,15 +221,15 @@ export function drawBall(ctx, pos, { ghost = false } = {}) {
  * Inline callout card anchored to a point on the map — the post-shot note.
  * @param {{title: string, tone: 'good'|'ok'|'bad', lines: string[]}} note
  */
-export function drawCallout(ctx, anchor, note) {
+export function drawCallout(ctx, anchorPx, note) {
   const TONES = { good: '#6fd08c', ok: '#ffd166', bad: '#e07070' };
   ctx.font = '600 13px system-ui';
   const titleW = ctx.measureText(note.title).width;
   ctx.font = '12px system-ui';
   const w = Math.max(titleW, ...note.lines.map((l) => ctx.measureText(l).width)) + 24;
   const h = 26 + note.lines.length * 17;
-  const ax = (anchor.x + 0.5) * TILE;
-  const ay = (anchor.y + 0.5) * TILE;
+  const ax = anchorPx.x;
+  const ay = anchorPx.y;
   // place above-right, flipping to stay on canvas
   let bx = ax + 16;
   let by = ay - h - 16;

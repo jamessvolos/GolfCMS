@@ -37,6 +37,30 @@ let profile = handicapById(localStorage.getItem('golfcms.handicap') ?? 'scratch'
 
 const toPin = (p) => dist(p, course.hole);
 
+// --- mobile & orientation ---
+let touchMode = false;
+let dragStart = null; // {sx, sy, t0} during a touch drag
+let rotated = false; // portrait: course drawn tee-at-bottom, green-at-top
+let hadWater = false; // for the haptic tick on risk transitions
+
+function toScreen(p) {
+  return rotated
+    ? { x: (p.y + 0.5) * TILE, y: canvas.height - (p.x + 0.5) * TILE }
+    : { x: (p.x + 0.5) * TILE, y: (p.y + 0.5) * TILE };
+}
+function fromScreenPx(sx, sy) {
+  return rotated
+    ? { x: (canvas.height - sy) / TILE - 0.5, y: sx / TILE - 0.5 }
+    : { x: sx / TILE - 0.5, y: sy / TILE - 0.5 };
+}
+function beginWorld() {
+  ctx.save();
+  if (rotated) {
+    ctx.translate(0, canvas.height);
+    ctx.rotate(-Math.PI / 2);
+  }
+}
+
 function startRound(seed, daily) {
   round = { seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0 };
   location.hash = daily ? '#/daily' : `#/round/${round.seed}`;
@@ -77,6 +101,7 @@ function loadHole() {
     verdict.textContent =
       `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
     document.getElementById('pattern').textContent = '';
+    if (touchMode) initNeutralAim();
     refresh();
   }, 30);
 }
@@ -90,14 +115,18 @@ function refresh() {
     `Hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} (par ${holeInfo.par}, ${holeInfo.yds} yds) · ` +
     `Shot ${strokes + 1} · ${yards(toPin(ball))} yds out · ${round.totalPoints + pts} pts`;
   document.getElementById('commit').hidden = phase !== 'reveal';
+  document.getElementById('hit').hidden = !(touchMode && phase === 'aim' && aimTarget);
 }
 
 function drawBase() {
-  canvas.width = course.width * TILE;
-  canvas.height = course.height * TILE;
+  rotated = window.innerHeight > window.innerWidth;
+  canvas.width = (rotated ? course.height : course.width) * TILE;
+  canvas.height = (rotated ? course.width : course.height) * TILE;
+  beginWorld();
   ctx.drawImage(art, 0, 0);
-  drawFlag(ctx, course.hole);
-  drawBall(ctx, ball);
+  ctx.restore();
+  drawFlag(ctx, toScreen(course.hole));
+  drawBall(ctx, toScreen(ball));
 }
 
 function ellipsePath(from, target, sigmaScale, k) {
@@ -111,6 +140,7 @@ function ellipsePath(from, target, sigmaScale, k) {
 
 function drawAim() {
   const lie = lieParams(cellAt(course, ball.x, ball.y));
+  beginWorld();
   ctx.setLineDash([5, 5]);
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
   ctx.beginPath();
@@ -139,70 +169,72 @@ function drawAim() {
     ctx.arc((d.x + 0.5) * TILE, (d.y + 0.5) * TILE, d.outcome === 'wet' ? 3.5 : 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
-  // carry yardage tag beside the target
+  ctx.restore();
+  // carry yardage tag beside the target (screen space, always upright)
   const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
+  const tp = toScreen(aimTarget);
   ctx.font = 'bold 13px system-ui';
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = 'rgba(0,0,0,0.7)';
   ctx.lineWidth = 3;
   const label = `${yards(carry)}y`;
-  const lx = (aimTarget.x + 0.5) * TILE + 12;
-  const ly = (aimTarget.y + 0.5) * TILE - 10;
-  ctx.strokeText(label, lx, ly);
-  ctx.fillText(label, lx, ly);
+  ctx.strokeText(label, tp.x + 12, tp.y - 10);
+  ctx.fillText(label, tp.x + 12, tp.y - 10);
   ctx.lineWidth = 1;
 }
 
 function drawReveal() {
   // heatmap: green = smart aim, red = stroke-burning aim
+  beginWorld();
   const min = Math.min(...reveal.heat.map((c) => c.e));
   for (const c of reveal.heat) {
     const badness = Math.min(1, (c.e - min) / 1.2);
     ctx.fillStyle = `rgba(${Math.round(80 + 175 * badness)}, ${Math.round(200 - 140 * badness)}, 80, 0.30)`;
     ctx.fillRect(c.x * TILE, c.y * TILE, TILE, TILE);
   }
+  ctx.restore();
   // your pick ✕
-  const yx = (reveal.your.x + 0.5) * TILE, yy = (reveal.your.y + 0.5) * TILE;
+  const { x: yx, y: yy } = toScreen(reveal.your);
   ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(yx - 8, yy - 8); ctx.lineTo(yx + 8, yy + 8);
   ctx.moveTo(yx + 8, yy - 8); ctx.lineTo(yx - 8, yy + 8);
   ctx.stroke(); ctx.lineWidth = 1;
   // optimal ★ (drawn as a ringed dot)
-  const ox = (reveal.score.optimal.x + 0.5) * TILE, oy = (reveal.score.optimal.y + 0.5) * TILE;
+  const { x: ox, y: oy } = toScreen(reveal.score.optimal);
   ctx.strokeStyle = '#6fd08c'; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.stroke();
   ctx.fillStyle = '#6fd08c';
   ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 1;
   // where the sampled ball actually went
-  if (reveal.landing) drawBall(ctx, reveal.landing);
+  if (reveal.landing) drawBall(ctx, toScreen(reveal.landing));
   // the post-shot note, inline on the map
-  if (reveal.note) drawCallout(ctx, reveal.landing ?? reveal.your, reveal.note);
+  if (reveal.note) drawCallout(ctx, toScreen(reveal.landing ?? reveal.your), reveal.note);
 }
 
-canvas.addEventListener('mousemove', (e) => {
-  if (phase !== 'aim') return;
-  const r = canvas.getBoundingClientRect();
-  const x = ((e.clientX - r.left) * (canvas.width / r.width)) / TILE - 0.5;
-  const y = ((e.clientY - r.top) * (canvas.height / r.height)) / TILE - 0.5;
+function setAim(pt) {
   const lie = lieParams(cellAt(course, ball.x, ball.y));
-  const d = Math.hypot(x - ball.x, y - ball.y);
+  const d = Math.hypot(pt.x - ball.x, pt.y - ball.y);
   // clamp inside the ring by half a tile so rounding can't push the target
   // past maxDist (which the evaluator would price as unreachable)
   const clamp = Math.min(1, (lie.maxDist - 0.51) / Math.max(d, 0.001));
   aimTarget = {
-    x: Math.round(ball.x + (x - ball.x) * clamp),
-    y: Math.round(ball.y + (y - ball.y) * clamp),
+    x: Math.round(ball.x + (pt.x - ball.x) * clamp),
+    y: Math.round(ball.y + (pt.y - ball.y) * clamp),
   };
+  updateAimReadout(lie);
+  refresh();
+}
+
+function updateAimReadout(lie) {
   const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
   const leaves = toPin(aimTarget);
   verdict.textContent =
     `Pin ${yards(toPin(ball))} yds · this target: ${yards(carry)}-yd carry (${clubName(carry)})` +
     (leaves > 1.5 ? ` · leaves ${yards(leaves)} yds in` : ' · going at the flag');
-  const lieHere = lieParams(cellAt(course, ball.x, ball.y));
-  const s = sigmas(carry, lieHere.sigmaScale, profile);
-  const stats = patternStats(course, ball, aimTarget, lieHere.sigmaScale, profile);
+  const s = sigmas(carry, lie.sigmaScale, profile);
+  const stats = patternStats(course, ball, aimTarget, lie.sigmaScale, profile);
   const parts = [];
   if (stats.pct.green) parts.push(`<span class="fw">${stats.pct.green}% green</span>`);
   if (stats.pct.fairway) parts.push(`<span class="fw">${stats.pct.fairway}% fairway</span>`);
@@ -213,14 +245,82 @@ canvas.addEventListener('mousemove', (e) => {
   document.getElementById('pattern').innerHTML =
     `Pattern ${yards(4 * s.lat)} × ${yards(4 * s.long)} yds · ${parts.join(' · ')}` +
     (stats.medianLeave !== null ? ` · median leave ${yards(stats.medianLeave)} yds` : '');
-  refresh();
+  // haptic tick when water/OB comes into or out of play while dragging
+  const wetNow = stats.pct.wet > 0;
+  if (touchMode && wetNow !== hadWater) navigator.vibrate?.(12);
+  hadWater = wetNow;
+}
+
+function eventCoursePoint(e) {
+  const r = canvas.getBoundingClientRect();
+  return fromScreenPx(
+    (e.clientX - r.left) * (canvas.width / r.width),
+    (e.clientY - r.top) * (canvas.height / r.height)
+  );
+}
+
+/** Touch users get a sensible starting target to nudge from. */
+function initNeutralAim() {
+  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const d = toPin(ball);
+  const f = Math.min(lie.maxDist * 0.7, Math.max(1, d)) / Math.max(d, 0.001);
+  setAim({ x: ball.x + (course.hole.x - ball.x) * f, y: ball.y + (course.hole.y - ball.y) * f });
+}
+
+canvas.addEventListener('pointermove', (e) => {
+  if (phase !== 'aim') return;
+  if (e.pointerType === 'touch') {
+    // relative drag: the target moves with your finger's delta, so the
+    // thumb never has to sit on the pattern itself
+    if (!dragStart) return;
+    e.preventDefault();
+    const now = eventCoursePoint(e);
+    setAim({
+      x: dragStart.t0.x + (now.x - dragStart.at.x),
+      y: dragStart.t0.y + (now.y - dragStart.at.y),
+    });
+    return;
+  }
+  setAim(eventCoursePoint(e)); // mouse: classic hover-follow
 });
 
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  if (!touchMode) {
+    touchMode = true;
+    document.body.classList.add('touch');
+  }
+  if (phase === 'reveal') {
+    advance();
+    return;
+  }
+  if (phase !== 'aim') return;
+  e.preventDefault();
+  if (!aimTarget) initNeutralAim();
+  dragStart = { at: eventCoursePoint(e), t0: { ...aimTarget } };
+  try {
+    canvas.setPointerCapture(e.pointerId);
+  } catch {
+    // synthetic/expired pointers can't be captured; dragging still works
+  }
+});
+window.addEventListener('pointerup', () => { dragStart = null; });
+
 canvas.addEventListener('click', () => {
+  if (touchMode) return; // touch commits via the Hit button; taps advance reveals
   if (phase === 'reveal') return advance();
   if (phase !== 'aim' || !aimTarget) return;
   commitDecision();
 });
+
+document.getElementById('hit').addEventListener('click', () => {
+  if (phase === 'aim' && aimTarget) commitDecision();
+});
+
+window.addEventListener('resize', () => {
+  if (course && phase !== 'loading') refresh();
+});
+
 document.getElementById('commit').addEventListener('click', advance);
 
 function commitDecision() {
@@ -284,6 +384,7 @@ function advance() {
   verdict.textContent =
     `Shot ${strokes + 1}: ${yards(toPin(ball))} yds to the pin — pick your target from this lie.`;
   document.getElementById('pattern').textContent = '';
+  if (touchMode) initNeutralAim();
   refresh();
 }
 
