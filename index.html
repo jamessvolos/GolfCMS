@@ -25,7 +25,7 @@
     display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
     background: var(--panel); border-radius: 10px; padding: 10px 14px; margin-top: 10px; max-width: 960px;
   }
-  button {
+  button, select {
     background: #234732; color: var(--ink); border: 1px solid #38664a;
     border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer;
   }
@@ -59,6 +59,7 @@
 <div id="hud">
   <span id="score">Hole – · Shot – · 0 pts</span>
   <button id="commit" hidden>Play on ➜</button>
+  <label style="color:var(--dim);font-size:12px">HCP <select id="handicap"></select></label>
   <button id="daily">Daily round</button>
   <button id="new">New round</button>
   <button id="share">Share round</button>

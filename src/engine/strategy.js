@@ -6,7 +6,7 @@
 
 import { GREEN, WATER } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
-import { lieParams, patternPoints, restingCell } from './dispersion.js';
+import { lieParams, patternPoints, restingCell, DEFAULT_PROFILE } from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
 
@@ -20,7 +20,7 @@ export function expectedPutts(d) {
  * Compute the expected-strokes field. Deterministic and pure per course.
  * @returns {Float64Array} V indexed cell-major (y * width + x); Infinity for water.
  */
-export function strokesField(course, sweeps = 6) {
+export function strokesField(course, sweeps = 6, profile = DEFAULT_PROFILE) {
   const { width, height } = course;
   const V = new Float64Array(width * height);
   const holeD = (x, y) => Math.hypot(x - course.hole.x, y - course.hole.y);
@@ -43,7 +43,7 @@ export function strokesField(course, sweeps = 6) {
 
   for (let sweep = 0; sweep < sweeps; sweep++) {
     for (const cell of order) {
-      V[cell.i] = 1 + bestAim(course, V, cell, 2).value;
+      V[cell.i] = 1 + bestAim(course, V, cell, 2, profile).value;
     }
   }
   return V;
@@ -55,7 +55,7 @@ export function strokesField(course, sweeps = 6) {
  * player-facing answers use 1).
  * @returns {{target: {x,y}, value: number}}
  */
-export function bestAim(course, V, from, stride = 1) {
+export function bestAim(course, V, from, stride = 1, profile = DEFAULT_PROFILE) {
   const lie = lieParams(cellAt(course, from.x, from.y));
   let best = { target: { x: from.x, y: from.y }, value: Infinity };
   const r = lie.maxDist;
@@ -63,7 +63,7 @@ export function bestAim(course, V, from, stride = 1) {
     for (let tx = Math.max(0, from.x - r); tx < Math.min(course.width, from.x + r + 1); tx += stride) {
       const d = Math.hypot(tx - from.x, ty - from.y);
       if (d < 1 || d > r) continue;
-      const value = evaluateAim(course, V, from, { x: tx, y: ty });
+      const value = evaluateAim(course, V, from, { x: tx, y: ty }, profile);
       if (value < best.value) best = { target: { x: tx, y: ty }, value };
     }
   }
@@ -74,10 +74,10 @@ export function bestAim(course, V, from, stride = 1) {
  * Expected cost-to-hole AFTER hitting from `from` at `target` — the mean of
  * V over the landing pattern, with penalties for water/OB samples.
  */
-export function evaluateAim(course, V, from, target) {
+export function evaluateAim(course, V, from, target, profile = DEFAULT_PROFILE) {
   const lie = lieParams(cellAt(course, from.x, from.y));
   if (Math.hypot(target.x - from.x, target.y - from.y) > lie.maxDist + 0.01) return Infinity;
-  const pts = patternPoints(from, target, lie.sigmaScale);
+  const pts = patternPoints(from, target, lie.sigmaScale, undefined, profile);
   const fromV = inBounds(course, from.x, from.y) ? V[from.y * course.width + from.x] : 5;
   let total = 0;
   for (const p of pts) {
@@ -97,9 +97,9 @@ export function evaluateAim(course, V, from, target) {
  * Score one player decision, GeoGuessr-style.
  * @returns {{yourE: number, optimalE: number, sgLost: number, points: number, optimal: {x,y}}}
  */
-export function scoreDecision(course, V, from, target) {
-  const optimal = bestAim(course, V, from, 1);
-  const yourAfter = evaluateAim(course, V, from, target);
+export function scoreDecision(course, V, from, target, profile = DEFAULT_PROFILE) {
+  const optimal = bestAim(course, V, from, 1, profile);
+  const yourAfter = evaluateAim(course, V, from, target, profile);
   const yourE = 1 + yourAfter;
   const optimalE = 1 + optimal.value;
   const sgLost = Math.max(0, yourE - optimalE);
@@ -113,7 +113,7 @@ export function isHoleOver(course, ball) {
 }
 
 /** Heat data for the reveal: expected total strokes for each aim candidate. */
-export function aimHeatmap(course, V, from, stride = 1) {
+export function aimHeatmap(course, V, from, stride = 1, profile = DEFAULT_PROFILE) {
   const lie = lieParams(cellAt(course, from.x, from.y));
   const cells = [];
   const r = lie.maxDist;
@@ -122,7 +122,7 @@ export function aimHeatmap(course, V, from, stride = 1) {
       const d = Math.hypot(tx - from.x, ty - from.y);
       if (d < 1 || d > r) continue;
       if (cellAt(course, tx, ty) === WATER) continue;
-      cells.push({ x: tx, y: ty, e: 1 + evaluateAim(course, V, from, { x: tx, y: ty }) });
+      cells.push({ x: tx, y: ty, e: 1 + evaluateAim(course, V, from, { x: tx, y: ty }, profile) });
     }
   }
   return cells;

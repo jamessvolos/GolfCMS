@@ -7,12 +7,12 @@ import { substream } from '../engine/rng.js';
 import { generateCourse } from '../engine/generate.js';
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell } from '../engine/dispersion.js';
+import { lieParams, sigmas, patternStats, sampleLanding, restingCell, HANDICAPS, handicapById } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
-import { terrainColor, TILE } from './render.js';
+import { renderCourseArt, drawFlag, drawBall, drawCallout, TILE } from './paint.js';
 
 const HOLES_PER_ROUND = 5;
 const canvas = document.getElementById('course');
@@ -32,6 +32,8 @@ let phase = 'loading'; // aim | reveal | loading | holeover
 let aimTarget = null;
 let reveal = null; // {your, optimal, score, heat, landing}
 let holeInfo = null; // {par, yds} for the current hole
+let art = null; // offscreen course rendering, rebuilt per hole
+let profile = handicapById(localStorage.getItem('golfcms.handicap') ?? 'scratch');
 
 const toPin = (p) => dist(p, course.hole);
 
@@ -60,7 +62,8 @@ function loadHole() {
     course = generateCourse(seed, 'classic', { holeDistTiles: randInt(lenRng, band.min, band.max) });
     const lengthTiles = dist(course.tee, course.hole);
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
-    V = strokesField(course);
+    V = strokesField(course, 6, profile);
+    art = renderCourseArt(course);
     ball = { ...course.tee };
     strokes = 0;
     decisions = [];
@@ -92,37 +95,14 @@ function refresh() {
 function drawBase() {
   canvas.width = course.width * TILE;
   canvas.height = course.height * TILE;
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      const t = cellAt(course, x, y);
-      ctx.fillStyle = terrainColor(t);
-      ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
-      if (slopeDir(t)) {
-        ctx.fillStyle = 'rgba(0,0,0,0.25)';
-        ctx.fillRect(x * TILE + 9, y * TILE + 9, 6, 6);
-      }
-    }
-  }
-  // flag
-  const hx = (course.hole.x + 0.5) * TILE;
-  const hy = (course.hole.y + 0.5) * TILE;
-  ctx.fillStyle = '#1c2b1f';
-  ctx.beginPath(); ctx.arc(hx, hy, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#eee';
-  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx, hy - 18); ctx.stroke();
-  ctx.fillStyle = '#e74c3c';
-  ctx.beginPath(); ctx.moveTo(hx, hy - 18); ctx.lineTo(hx + 12, hy - 13); ctx.lineTo(hx, hy - 8);
-  ctx.closePath(); ctx.fill();
-  // ball
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-  ctx.beginPath(); ctx.arc((ball.x + 0.5) * TILE, (ball.y + 0.5) * TILE, 6, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
+  ctx.drawImage(art, 0, 0);
+  drawFlag(ctx, course.hole);
+  drawBall(ctx, ball);
 }
 
 function ellipsePath(from, target, sigmaScale, k) {
   const d = Math.hypot(target.x - from.x, target.y - from.y) || 0.001;
-  const s = sigmas(d, sigmaScale);
+  const s = sigmas(d, sigmaScale, profile);
   const ang = Math.atan2(target.y - from.y, target.x - from.x);
   ctx.beginPath();
   ctx.ellipse((target.x + 0.5) * TILE, (target.y + 0.5) * TILE,
@@ -153,7 +133,7 @@ function drawAim() {
   // the pattern itself: 48 sample shots, colored by where they finish
   const DOT = { fairway: '#ffffff', green: '#b6ffc0', rough: '#2e5230',
     sand: '#a8813a', trees: '#123a1c', wet: '#ff5c5c' };
-  for (const d of patternStats(course, ball, aimTarget, lie.sigmaScale).dots) {
+  for (const d of patternStats(course, ball, aimTarget, lie.sigmaScale, profile).dots) {
     ctx.fillStyle = DOT[d.outcome];
     ctx.beginPath();
     ctx.arc((d.x + 0.5) * TILE, (d.y + 0.5) * TILE, d.outcome === 'wet' ? 3.5 : 2.5, 0, Math.PI * 2);
@@ -196,13 +176,9 @@ function drawReveal() {
   ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 1;
   // where the sampled ball actually went
-  if (reveal.landing) {
-    ctx.fillStyle = '#fff';
-    ctx.strokeStyle = '#000';
-    ctx.beginPath();
-    ctx.arc((reveal.landing.x + 0.5) * TILE, (reveal.landing.y + 0.5) * TILE, 6, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
-  }
+  if (reveal.landing) drawBall(ctx, reveal.landing);
+  // the post-shot note, inline on the map
+  if (reveal.note) drawCallout(ctx, reveal.landing ?? reveal.your, reveal.note);
 }
 
 canvas.addEventListener('mousemove', (e) => {
@@ -225,8 +201,8 @@ canvas.addEventListener('mousemove', (e) => {
     `Pin ${yards(toPin(ball))} yds · this target: ${yards(carry)}-yd carry (${clubName(carry)})` +
     (leaves > 1.5 ? ` · leaves ${yards(leaves)} yds in` : ' · going at the flag');
   const lieHere = lieParams(cellAt(course, ball.x, ball.y));
-  const s = sigmas(carry, lieHere.sigmaScale);
-  const stats = patternStats(course, ball, aimTarget, lieHere.sigmaScale);
+  const s = sigmas(carry, lieHere.sigmaScale, profile);
+  const stats = patternStats(course, ball, aimTarget, lieHere.sigmaScale, profile);
   const parts = [];
   if (stats.pct.green) parts.push(`<span class="fw">${stats.pct.green}% green</span>`);
   if (stats.pct.fairway) parts.push(`<span class="fw">${stats.pct.fairway}% fairway</span>`);
@@ -250,9 +226,9 @@ document.getElementById('commit').addEventListener('click', advance);
 function commitDecision() {
   const from = { ...ball };
   const lie = lieParams(cellAt(course, from.x, from.y));
-  const score = scoreDecision(course, V, from, aimTarget);
-  const heat = aimHeatmap(course, V, from, 1);
-  const land = sampleLanding(course, from, aimTarget, lie.sigmaScale, strokes);
+  const score = scoreDecision(course, V, from, aimTarget, profile);
+  const heat = aimHeatmap(course, V, from, 1, profile);
+  const land = sampleLanding(course, from, aimTarget, lie.sigmaScale, strokes, profile);
   const rest = restingCell(course, land.x, land.y);
   strokes += 1;
   let outcome;
@@ -278,12 +254,25 @@ function commitDecision() {
     `E[${score.optimalE.toFixed(2)}] · SG lost ${sg.toFixed(2)} · +${score.points} pts · ${ballNow}`;
   // risk ledger: your line vs the caddie's, in trouble percentages
   const trouble = (t) => {
-    const p = patternStats(course, from, t, lie.sigmaScale).pct;
+    const p = patternStats(course, from, t, lie.sigmaScale, profile).pct;
     return p.wet + p.sand + p.trees;
   };
+  const yourRisk = trouble(reveal.your);
+  const caddieRisk = trouble(score.optimal);
   document.getElementById('pattern').innerHTML =
-    `Risk taken — your line: <span class="wet">${trouble(reveal.your)}%</span> trouble ` +
-    `(water/sand/trees) · caddie's line: <span class="fw">${trouble(score.optimal)}%</span>`;
+    `Risk taken — your line: <span class="wet">${yourRisk}%</span> trouble ` +
+    `(water/sand/trees) · caddie's line: <span class="fw">${caddieRisk}%</span>`;
+  // inline post-shot note, pinned to where the ball finished
+  reveal.note = {
+    title: sg < 0.02 ? 'Caddie-approved' : sg < 0.08 ? 'Good call' : sg < 0.2 ? 'Loose' : 'Costly',
+    tone: sg < 0.08 ? 'good' : sg < 0.2 ? 'ok' : 'bad',
+    lines: [
+      `SG ${sg < 0.005 ? '±0.00' : '−' + sg.toFixed(2)} · +${score.points} pts`,
+      `E ${score.yourE.toFixed(2)} vs caddie ${score.optimalE.toFixed(2)}`,
+      `risk ${yourRisk}% vs caddie ${caddieRisk}%`,
+      outcome !== 'landed' ? outcome : `ball ${yards(toPin(ball))} yds out`,
+    ],
+  };
   refresh();
 }
 
@@ -341,6 +330,28 @@ document.getElementById('ov-next').addEventListener('click', () => {
 document.getElementById('ov-share').addEventListener('click', () => navigator.clipboard?.writeText(shareText()));
 document.getElementById('share').addEventListener('click', () => navigator.clipboard?.writeText(shareText()));
 document.getElementById('new').addEventListener('click', () => startRound((Math.random() * 0xffffffff) >>> 0, false));
+const hcpSel = document.getElementById('handicap');
+for (const h of HANDICAPS) {
+  const o = document.createElement('option');
+  o.value = h.id;
+  o.textContent = h.label;
+  o.selected = h.id === profile.id;
+  hcpSel.append(o);
+}
+hcpSel.addEventListener('change', () => {
+  profile = handicapById(hcpSel.value);
+  localStorage.setItem('golfcms.handicap', profile.id);
+  if (course && phase !== 'loading') {
+    verdict.textContent = `Recalibrating the caddie for a ${profile.label.toLowerCase()} pattern…`;
+    setTimeout(() => {
+      V = strokesField(course, 6, profile);
+      verdict.textContent =
+        `Caddie recalibrated: optimal targets now assume ${profile.label.toLowerCase()} dispersion. ` +
+        `${yards(toPin(ball))} yds to the pin.`;
+      refresh();
+    }, 30);
+  }
+});
 document.getElementById('daily').addEventListener('click', () => startRound(dailySeed(), true));
 
 // test hooks
