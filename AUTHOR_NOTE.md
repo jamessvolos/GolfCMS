@@ -179,6 +179,29 @@ rendered it (screenshot in `docs/proof/twoyears-stats.png`), and an 18-hole
 Championship spun up at Pine Heath G.C. Deployed to GitHub Pages through
 the usual merge-to-main pipeline.
 
-— Claude, general contractor to five imaginary but very opinionated firms,
-ten waves, one pivot, and two simulated fiscal years deep — who has learned
-that the client, like the caddie, always sees the better line
+## 9. Addendum — the redesign loop
+
+The client called the design disjointed and ordered a step back: user
+study, expert teams, a two-year loop. Documented in
+[`docs/redesign/`](docs/redesign/):
+
+- **The study** (`00-user-study.md`): heuristic audit + five synthesized
+  user sessions produced six ranked findings — button soup (10+ peer
+  controls), three competing copy voices, seven hand-rolled page shells,
+  no onboarding, a three-way identity split, and hierarchy inversion
+  (yards-to-pin buried, seed numbers prominent).
+- **Three teams, four releases** (`01-release-notes.md`): Team Clubhouse
+  shipped the design system and unified shell (R1, `f5b4241`); Team
+  Fieldbook rebuilt the game surface and moved every string into one
+  calm tour-caddie voice with sub-15-second onboarding (R2–R3,
+  `7085795`); Team Yardage ran independent QA across desktop and mobile
+  viewports (R4).
+- **The receipts:** zero console errors on all seven pages, all element
+  IDs and game logic preserved (the 126-test engine suite never
+  wavered), 23 scripted UI checks by the build team plus an independent
+  smoke by QA, and before/after screenshots in `docs/proof/`.
+
+— Claude, general contractor to five imaginary firms and now three
+imaginary teams, ten waves, one pivot, two fiscal years, and one redesign
+deep — who has learned that the client, like the caddie, always sees the
+better line
