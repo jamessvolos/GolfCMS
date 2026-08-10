@@ -626,7 +626,18 @@ document.getElementById('hit').addEventListener('click', () => {
   if (phase === 'aim' && aimTarget) commitDecision();
 });
 
+// leaderboard URL: a plain preference riding along in the My-game panel
+const boardInput = document.getElementById('c-board');
+try {
+  if (boardInput) boardInput.value = localStorage.getItem('golfcms.leaderboard.url') ?? '';
+} catch { /* storage blocked: field starts empty */ }
+
 document.getElementById('custom-apply').addEventListener('click', () => {
+  try {
+    const url = boardInput?.value.trim() ?? '';
+    if (url) localStorage.setItem('golfcms.leaderboard.url', url);
+    else localStorage.removeItem('golfcms.leaderboard.url');
+  } catch { /* best-effort preference */ }
   const custom = {
     base: Number(document.getElementById('c-width').value),
     longExtra: Number(document.getElementById('c-long').value),
@@ -878,10 +889,48 @@ function advance() {
   refresh();
 }
 
+/** Daily streak: record today's finished Daily and count consecutive days
+ *  (UTC, matching the daily seed) ending today. Best-effort, like all stats. */
+function recordDailyStreak() {
+  try {
+    const KEY = 'golfcms.caddie.streak.v1';
+    const data = JSON.parse(localStorage.getItem(KEY)) ?? {};
+    const dates = Array.isArray(data.dates) ? data.dates : [];
+    const today = new Date().toISOString().slice(0, 10);
+    if (!dates.includes(today)) dates.push(today);
+    dates.sort();
+    if (dates.length > 400) dates.splice(0, dates.length - 400);
+    localStorage.setItem(KEY, JSON.stringify({ dates }));
+    const have = new Set(dates);
+    let streak = 0;
+    for (let t = Date.parse(today); have.has(new Date(t).toISOString().slice(0, 10)); t -= 86400000) streak += 1;
+    return streak;
+  } catch {
+    return 0; // storage blocked: no streak, no drama
+  }
+}
+
 function finishHole() {
   // holed out: the card shows REAL strokes, actual putts included. Only a
   // hole abandoned at the decision cap still gets the old 2.5-putt estimate.
   const total = holedOut ? strokes : strokes + 2.5;
+  // calibration ledger: what the model said off the tee vs what you carded
+  try {
+    const KEY = 'golfcms.calibration.v1';
+    let cal = JSON.parse(localStorage.getItem(KEY)) ?? [];
+    if (!Array.isArray(cal)) cal = [];
+    if (decisions.length && Number.isFinite(decisions[0]?.yourE)) {
+      cal.push({
+        at: Date.now(),
+        predicted: +decisions[0].yourE.toFixed(2),
+        actual: +total.toFixed(holedOut ? 0 : 1),
+        holed: holedOut,
+        n: decisions.length,
+      });
+      if (cal.length > 500) cal.splice(0, cal.length - 500);
+      localStorage.setItem(KEY, JSON.stringify(cal));
+    }
+  } catch { /* storage blocked: calibration is best-effort */ }
   const holePts = Math.round(decisions.reduce((s, d) => s + d.points, 0) / Math.max(1, decisions.length));
   round.holes.push({
     points: holePts,
@@ -894,6 +943,7 @@ function finishHole() {
   round.totalPoints += holePts;
   phase = 'holeover';
   const done = round.holeIndex + 1 >= round.count;
+  if (done && round.daily) round.streak = recordDailyStreak();
   overlay.querySelector('.big').textContent = done
     ? copy.roundScore(round.label ?? copy.genericRoundLabel, round.totalPoints, round.count * 1000)
     : copy.holeScore(round.holeIndex + 1, holePts);
@@ -910,6 +960,7 @@ function finishHole() {
       });
   overlay.querySelector('.sub').textContent = done
     ? copy.roundSub(round.count, copy.roundGrade(round.totalPoints / (round.count * 1000)))
+      + (round.streak > 1 ? ` · 🔥 ${round.streak}` : '')
     : holeLine;
   document.getElementById('ov-next').textContent = done ? copy.newRound : copy.nextHole;
   const coach = document.getElementById('coach');
@@ -927,10 +978,11 @@ function finishHole() {
 function shareText() {
   const label = round.label ??
     (round.daily ? copy.shareDaily(dailyNumber()) : copy.shareRound(round.seed));
-  return copy.share({
+  const text = copy.share({
     label, total: round.totalPoints, max: round.count * 1000,
     squares: copy.shareSquares(round.holes),
   });
+  return round.streak > 1 ? `${text} 🔥${round.streak}` : text;
 }
 
 document.getElementById('ov-next').addEventListener('click', () => {

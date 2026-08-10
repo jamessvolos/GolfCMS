@@ -1,5 +1,6 @@
 // Career dashboard — reads the caddie decision log and tells the strokes-gained story.
 const KEY = 'golfcms.caddie.log.v1';
+const CAL_KEY = 'golfcms.calibration.v1';
 const app = document.getElementById('app');
 
 const COL = { line: '#6fd08c', avg: '#ffd166', dim: '#9db8a5', bad: '#e07070' };
@@ -100,6 +101,46 @@ function discipline(log) {
     text = `your risk appetite sits within <span class="num">${fmt(Math.abs(delta), 1)}</span> points of the caddie's read — disciplined. Keep trusting the numbers.`;
   }
   sec.append(el('p', 'verdict', `Avg (your risk − caddie risk): <span class="num ${cls}">${delta >= 0 ? '+' : ''}${fmt(delta, 1)}</span> — ${text}`));
+  return sec;
+}
+
+function loadCalibration() {
+  let raw;
+  try { raw = JSON.parse(localStorage.getItem(CAL_KEY) ?? '[]'); }
+  catch { return []; }
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(e => e && typeof e === 'object' &&
+    Number.isFinite(e.predicted) && Number.isFinite(e.actual));
+}
+
+function calibration(log) {
+  const cal = loadCalibration();
+  if (!cal.length) return null;
+  const sec = el('section');
+  sec.append(el('h2', '', 'Calibration'));
+  // bias: what you actually carded minus what the model called off the tee
+  const bias = avg(cal.map(e => e.actual - e.predicted));
+  let cls, verdict;
+  if (bias > 0.25) {
+    cls = 'over';
+    verdict = "the caddie's model runs <span class=\"num\">hot</span> for you — it promises more than your execution delivers. Trust the reads, but budget the extra strokes.";
+  } else if (bias < -0.25) {
+    cls = 'under';
+    verdict = "the caddie's model runs <span class=\"num\">cold</span> for you — you beat its forecast. Your execution is better than the profile assumes; consider a tighter handicap setting.";
+  } else {
+    cls = 'disciplined';
+    verdict = "the caddie's model runs <span class=\"num\">honest</span> for you — predictions and cards agree. What it says a hole costs is what it costs.";
+  }
+  sec.append(el('p', 'verdict',
+    `Mean (actual − predicted) over <span class="num">${cal.length}</span> hole${cal.length === 1 ? '' : 's'}: ` +
+    `<span class="num ${cls}">${bias >= 0 ? '+' : ''}${fmt(bias)}</span> strokes — ${verdict}`));
+  // decision tax: what your aiming choices cost, scaled to a full 18
+  const meanSG = avg(log.map(e => e.sgLost));
+  const decPerHole = avg(cal.map(e => Number.isFinite(e.n) ? e.n : 0)) || 0;
+  const tax = meanSG * decPerHole * 18;
+  sec.append(el('p', 'callout',
+    `Decision tax per 18: <span class="hot">${fmt(tax, 1)}</span> strokes ` +
+    `(${fmt(meanSG)} SG lost/decision × ${fmt(decPerHole, 1)} decisions/hole × 18).`));
   return sec;
 }
 
@@ -261,7 +302,10 @@ function render() {
   const log = loadLog();
   app.replaceChildren();
   if (!log.length) { app.append(emptyState()); return; }
-  app.append(tiles(log), leaks(log), discipline(log), trend(log));
+  app.append(tiles(log), leaks(log), discipline(log));
+  const cal = calibration(log);
+  if (cal) app.append(cal);
+  app.append(trend(log));
   app.append(roundsTable(log));
   const split = hcpSplit(log);
   if (split) app.append(split);
@@ -269,6 +313,6 @@ function render() {
 
 window.__dash = { render };
 window.addEventListener('storage', ev => {
-  if (!ev.key || ev.key === KEY) render();
+  if (!ev.key || ev.key === KEY || ev.key === CAL_KEY) render();
 });
 render();
