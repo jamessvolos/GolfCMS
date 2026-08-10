@@ -6,7 +6,7 @@
 
 import { GREEN, WATER } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
-import { lieParams, patternPoints, restingCell, windShift, DEFAULT_PROFILE } from './dispersion.js';
+import { lieParams, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE } from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
 
@@ -58,7 +58,7 @@ export function strokesField(course, sweeps = 6, profile = DEFAULT_PROFILE) {
 export function bestAim(course, V, from, stride = 1, profile = DEFAULT_PROFILE) {
   const lie = lieParams(cellAt(course, from.x, from.y));
   let best = { target: { x: from.x, y: from.y }, value: Infinity };
-  const r = lie.maxDist;
+  const r = reach(lie, profile);
   for (let ty = Math.max(0, from.y - r); ty < Math.min(course.height, from.y + r + 1); ty += stride) {
     for (let tx = Math.max(0, from.x - r); tx < Math.min(course.width, from.x + r + 1); tx += stride) {
       const d = Math.hypot(tx - from.x, ty - from.y);
@@ -76,7 +76,7 @@ export function bestAim(course, V, from, stride = 1, profile = DEFAULT_PROFILE) 
  */
 export function evaluateAim(course, V, from, target, profile = DEFAULT_PROFILE) {
   const lie = lieParams(cellAt(course, from.x, from.y));
-  if (Math.hypot(target.x - from.x, target.y - from.y) > lie.maxDist + 0.01) return Infinity;
+  if (Math.hypot(target.x - from.x, target.y - from.y) > reach(lie, profile) + 0.01) return Infinity;
   const pts = patternPoints(from, target, lie.sigmaScale, undefined, profile);
   const drift = windShift(course, from, target);
   const fromV = inBounds(course, from.x, from.y) ? V[from.y * course.width + from.x] : 5;
@@ -117,7 +117,7 @@ export function isHoleOver(course, ball) {
 export function aimHeatmap(course, V, from, stride = 1, profile = DEFAULT_PROFILE) {
   const lie = lieParams(cellAt(course, from.x, from.y));
   const cells = [];
-  const r = lie.maxDist;
+  const r = reach(lie, profile);
   for (let ty = Math.max(0, from.y - r); ty < Math.min(course.height, from.y + r + 1); ty += stride) {
     for (let tx = Math.max(0, from.x - r); tx < Math.min(course.width, from.x + r + 1); tx += stride) {
       const d = Math.hypot(tx - from.x, ty - from.y);
