@@ -6,7 +6,7 @@
 
 import { GREEN, WATER } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
-import { lieParams, patternPoints, restingCell, DEFAULT_PROFILE } from './dispersion.js';
+import { lieParams, patternPoints, restingCell, windShift, DEFAULT_PROFILE } from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
 
@@ -78,10 +78,11 @@ export function evaluateAim(course, V, from, target, profile = DEFAULT_PROFILE) 
   const lie = lieParams(cellAt(course, from.x, from.y));
   if (Math.hypot(target.x - from.x, target.y - from.y) > lie.maxDist + 0.01) return Infinity;
   const pts = patternPoints(from, target, lie.sigmaScale, undefined, profile);
+  const drift = windShift(course, from, target);
   const fromV = inBounds(course, from.x, from.y) ? V[from.y * course.width + from.x] : 5;
   let total = 0;
   for (const p of pts) {
-    const rest = restingCell(course, p.x, p.y);
+    const rest = restingCell(course, p.x + drift.x, p.y + drift.y);
     if (rest.kind === 'rest') {
       const v = V[rest.y * course.width + rest.x];
       total += Number.isFinite(v) ? v : PENALTY + fromV;

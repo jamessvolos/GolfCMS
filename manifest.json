@@ -1,0 +1,10 @@
+{
+  "name": "Caddie — golf strategy trainer",
+  "short_name": "Caddie",
+  "description": "GeoGuessr for golf strategy: pick targets, get scored in strokes gained.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#10241a",
+  "theme_color": "#10241a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

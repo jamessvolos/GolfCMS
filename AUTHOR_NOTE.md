@@ -151,5 +151,34 @@ quality. So:
 Everything under the pivot survived from the first ten waves: the seeded
 generator, the terrain system, the deploy pipeline, the rituals.
 
+## 8. Addendum — two years in one sitting
+
+After the Caddie pivot came the yardage book, the live dispersion
+intelligence, the art pass, handicap profiles, and the mobile pass. Then the
+client asked for two simulated years of the roadmap. Eight quarters, one
+commit each, all deployed:
+
+| Quarter | Commit | Shipped |
+|---|---|---|
+| **Y1Q1 — Wind** | `99145eb` | `windShift` drifts the pattern center downwind scaled by carry, applied to live stats, sampled balls, and the strategy layer — the caddie provably aims upwind to compensate. ~28% of holes generate as windy links. |
+| **Y1Q2 — Career SG log + dashboard** | `37b6a13` | Every aiming decision logged locally (SG lost, tee/approach, risk vs caddie risk, handicap); `stats.html` renders leak analysis, a risk-discipline verdict, a points sparkline with moving average, and recent rounds. |
+| **Y1Q3 — Weekly Major + Championship** | `4c5d51c` | `#/major`: five fixed holes per ISO week, same for everyone; `#/champ/<seed>`: a full 18. Rounds carry their own length, label, and route. |
+| **Y1Q4 — Pro mode** | `eeaa8fa` | Persisted toggle hiding the outcome dots and live odds — pure judgment, same scoring. The trainer becomes an exam. |
+| **Y2Q1 — Personal dispersion** | `eeaa8fa` | Custom profile editor: pattern width, long-club blowup, and a directional miss bias shifting the pattern mean sideways scaled by carry. The caddie re-solves against *your* pattern and is tested to aim into the miss. |
+| **Y2Q2 — Coach's notes** | `7ae84c6` | End-of-round recap names your two costliest targets with their SG and risk numbers, or tips its cap when every target was near-optimal. |
+| **Y2Q3 — Course identity** | `7ae84c6` | Seed-derived course names (Gorse Downs National, Pine Heath G.C.) headline every round and stay fixed for the week's Major. |
+| **Y2Q4 — PWA** | `7ae84c6` | Manifest + icon + stale-while-revalidate service worker: after one visit the whole trainer works offline — the generator is the content. Installable to the home screen. |
+
+**Proof:** the suite grew to **126 tests, all passing** — wind compensation,
+miss-bias compensation, and name determinism among the new behavioral
+guarantees — and every quarter was verified in one end-to-end Chromium
+session: the Major loaded at a named course with a wind label, Pro mode hid
+the intel, a custom right-miss profile recalibrated the caddie, a played
+decision landed in the career log with its full schema, `stats.html`
+rendered it (screenshot in `docs/proof/twoyears-stats.png`), and an 18-hole
+Championship spun up at Pine Heath G.C. Deployed to GitHub Pages through
+the usual merge-to-main pipeline.
+
 — Claude, general contractor to five imaginary but very opinionated firms,
-who has learned that the client, like the caddie, sees the better line
+ten waves, one pivot, and two simulated fiscal years deep — who has learned
+that the client, like the caddie, always sees the better line
