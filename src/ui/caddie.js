@@ -10,6 +10,7 @@ import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
 import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, HANDICAPS, handicapById } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
+import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
 import { renderCourseArt, drawFlag, drawBall, drawCallout, TILE } from './paint.js';
@@ -61,9 +62,12 @@ function beginWorld() {
   }
 }
 
-function startRound(seed, daily) {
-  round = { seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0 };
-  location.hash = daily ? '#/daily' : `#/round/${round.seed}`;
+function startRound(seed, daily, opts = {}) {
+  round = {
+    seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0,
+    count: opts.count ?? HOLES_PER_ROUND, label: opts.label ?? null, hash: opts.hash ?? null,
+  };
+  location.hash = round.hash ?? (daily ? '#/daily' : `#/round/${round.seed}`);
   loadHole();
 }
 
@@ -77,7 +81,7 @@ function holeSeed(i) {
 function loadHole() {
   phase = 'loading';
   overlay.classList.remove('show');
-  meta.textContent = `Hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · the caddie is reading the hole…`;
+  meta.textContent = `Hole ${round.holeIndex + 1}/${round.count} · the caddie is reading the hole…`;
   setTimeout(() => {
     const seed = holeSeed(round.holeIndex);
     // draw this hole's length from the par-3/4/5 menu, seeded per hole
@@ -95,9 +99,9 @@ function loadHole() {
     aimTarget = null;
     reveal = null;
     phase = 'aim';
-    const label = round.daily ? `Daily #${dailyNumber()}` : `Round ${round.seed}`;
+    const label = round.label ?? (round.daily ? `Daily #${dailyNumber()}` : `Round ${round.seed}`);
     meta.textContent =
-      `${label} · hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · par ${holeInfo.par} · ` +
+      `${label} · hole ${round.holeIndex + 1}/${round.count} · par ${holeInfo.par} · ` +
       `${holeInfo.yds} yds · ${course.archetype}` + windLabel();
     verdict.textContent =
       `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
@@ -113,7 +117,7 @@ function refresh() {
   if (phase === 'reveal' && reveal) drawReveal();
   const pts = decisions.reduce((s, d) => s + d.points, 0);
   scoreEl.textContent =
-    `Hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} (par ${holeInfo.par}, ${holeInfo.yds} yds) · ` +
+    `Hole ${round.holeIndex + 1}/${round.count} (par ${holeInfo.par}, ${holeInfo.yds} yds) · ` +
     `Shot ${strokes + 1} · ${yards(toPin(ball))} yds out · ${round.totalPoints + pts} pts`;
   document.getElementById('commit').hidden = phase !== 'reveal';
   document.getElementById('hit').hidden = !(touchMode && phase === 'aim' && aimTarget);
@@ -405,14 +409,14 @@ function finishHole() {
   round.holes.push({ points: holePts, strokes: +(strokes + putts).toFixed(1) });
   round.totalPoints += holePts;
   phase = 'holeover';
-  const done = round.holeIndex + 1 >= HOLES_PER_ROUND;
+  const done = round.holeIndex + 1 >= round.count;
   overlay.querySelector('.big').textContent = done
-    ? `Round: ${round.totalPoints} / ${HOLES_PER_ROUND * 1000}`
+    ? `${round.label ?? 'Round'}: ${round.totalPoints} / ${round.count * 1000}`
     : `Hole ${round.holeIndex + 1}: ${holePts} / 1000`;
   const est = (strokes + putts).toFixed(1);
   const vsPar = (strokes + putts - holeInfo.par).toFixed(1);
   overlay.querySelector('.sub').textContent = done
-    ? `Decision quality across ${HOLES_PER_ROUND} holes — ` + roundGrade(round.totalPoints)
+    ? `Decision quality across ${round.count} holes — ` + roundGrade(round.totalPoints)
     : `${decisions.length} decisions · est. ${est} strokes on the par-${holeInfo.par} ` +
       `${holeInfo.yds}-yarder (${vsPar >= 0 ? '+' : ''}${vsPar})`;
   document.getElementById('ov-next').textContent = done ? 'New round' : 'Next hole ⛳';
@@ -420,19 +424,20 @@ function finishHole() {
 }
 
 function roundGrade(p) {
-  const r = p / (HOLES_PER_ROUND * 1000);
+  const r = p / (round.count * 1000);
   return r > 0.97 ? 'tour-caddie brain. 🧠' : r > 0.9 ? 'sharp course management.'
     : r > 0.8 ? 'solid, with a few loose targets.' : 'the caddie would like a word.';
 }
 
 function shareText() {
-  const label = round.daily ? `Caddie Daily #${dailyNumber()}` : `Caddie round ${round.seed}`;
+  const label = round.label ??
+    (round.daily ? `Caddie Daily #${dailyNumber()}` : `Caddie round ${round.seed}`);
   const holes = round.holes.map((h) => (h.points > 970 ? '🟩' : h.points > 900 ? '🟨' : '🟥')).join('');
-  return `${label} — ${round.totalPoints}/${HOLES_PER_ROUND * 1000} ${holes}`;
+  return `${label} — ${round.totalPoints}/${round.count * 1000} ${holes}`;
 }
 
 document.getElementById('ov-next').addEventListener('click', () => {
-  if (round.holeIndex + 1 >= HOLES_PER_ROUND) {
+  if (round.holeIndex + 1 >= round.count) {
     startRound((Math.random() * 0xffffffff) >>> 0, false);
   } else {
     round.holeIndex += 1;
@@ -473,6 +478,21 @@ window.__caddie = {
   advance,
 };
 
+function startMajor() {
+  const wk = weekKey();
+  startRound(gauntletSeed('caddie-major-' + wk), false,
+    { count: 5, label: `Major ${wk}`, hash: '#/major' });
+}
+
+document.getElementById('major').addEventListener('click', startMajor);
+document.getElementById('champ').addEventListener('click', () => {
+  const seed = (Math.random() * 0xffffffff) >>> 0;
+  startRound(seed, false, { count: 18, label: `Championship ${seed}`, hash: `#/champ/${seed}` });
+});
+
 const m = location.hash.match(/^#\/round\/(\d+)/);
-if (m) startRound(Number(m[1]) >>> 0, false);
+const mc = location.hash.match(/^#\/champ\/(\d+)/);
+if (location.hash.startsWith('#/major')) startMajor();
+else if (mc) startRound(Number(mc[1]) >>> 0, false, { count: 18, label: `Championship ${mc[1]}`, hash: `#/champ/${mc[1]}` });
+else if (m) startRound(Number(m[1]) >>> 0, false);
 else startRound(dailySeed(), true);
