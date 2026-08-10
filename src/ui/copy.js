@@ -20,7 +20,7 @@ export const copy = {
 
   // ---- aiming ----
   firstAim: (yds) =>
-    `${yds} yds to the pin. Set the ellipse where the shot should finish — that is where it really lands.`,
+    `${yds} yds to the pin. Move to aim — the ellipse is everywhere this shot can finish. Click the course (or tap Hit it) to play it.`,
   nextShot: (shot, yds) => `${yds} yds in. Shot ${shot} — pick your target from this lie.`,
   aimReadout: ({ carry, club, leaves, atFlag }) =>
     `${carry}-yd carry, ${club}` + (atFlag ? ' — going at the flag.' : ` · leaves ${leaves} yds.`),
@@ -49,6 +49,11 @@ export const copy = {
     return ft > 0 ? `${mag} of pace past the cup` : `${mag} short of the cup`;
   },
   puttAim: ({ ft, pace, make }) => `${ft}-footer, playing ${pace} — ${make}% to drop.`,
+  /** Break call when slope bends the current line. `cups` is break in cup-widths. */
+  puttBreakNote: (side, cups) =>
+    cups < 1
+      ? ` Breaks ${side} edge — hold your line.`
+      : ` Breaks ${side} — play ${cups === 1 ? 'a cup' : `${cups} cups`} out.`,
   puttPatternLine: ({ make, three, leave }) =>
     `<span class="fw">${make}% make</span> · ${three}% three-putt risk` +
     (leave !== null ? ` · a miss leaves ${leave} ft` : ''),
@@ -57,8 +62,8 @@ export const copy = {
     : sg < 0.08 ? 'Good read — a hair off the best pace.'
     : sg < 0.2 ? 'Playable, but the pace gave a little away.'
     : 'Costly — that pace burns putts.',
-  puttVerdictLine: ({ call, pace, yourE, optimalE, sg, points, result }) =>
-    `${call} Caddie plays ${pace} — E ${optimalE} putts vs your E ${yourE} · SG −${sg} · +${points} pts · ${result}`,
+  puttVerdictLine: ({ call, pace, points, result }) =>
+    `${call} The caddie's read: ${pace} · +${points} pts · ${result}`,
   puttResult: {
     holed: 'center cup — it drops! ⛳',
     left: (ft) => `stays out — a ${ft}-footer left`,
@@ -76,9 +81,11 @@ export const copy = {
     : sg < 0.08 ? 'Good call — a whisker off the best line.'
     : sg < 0.2 ? 'Playable, but there was a better line.'
     : 'Costly — that target gives strokes away.',
-  verdictLine: ({ call, optCarry, yourE, optimalE, sg, points, ballNow }) =>
-    `${call} Caddie's line (green ring): the ${optCarry}-yd carry, E ${optimalE} vs your E ${yourE} · ` +
-    `SG −${sg} · +${points} pts · ${ballNow}`,
+  // Reveal line: name what the map means, then the caddie's line, then stop.
+  // The E-vs-E detail lives on the stamp chip — never say it twice.
+  verdictLine: ({ call, optCarry, sg, points, ballNow }) =>
+    `${call} The map grades every aim — green smart, red costly. The ring: ` +
+    `the caddie's ${optCarry}-yd line · +${points} pts · ${ballNow}`,
   riskLedger: (yours, caddies) =>
     `Risk: your line ran <span class="wet">${yours}%</span> trouble (water/sand/trees) · ` +
     `the caddie's held <span class="fw">${caddies}%</span>.`,
@@ -111,6 +118,7 @@ export const copy = {
   holeSub: ({ decisions, est, par, yds, vsPar }) =>
     `${decisions} decisions · est. ${est} strokes on the par-${par}, ${yds}-yarder (${vsPar})`,
   roundSub: (count, grade) => `Decision quality across ${count} holes — ${grade}`,
+  boardRank: (rank, of) => `Board: #${rank} of ${of}`,
   roundGrade: (r) =>
     r > 0.97 ? 'tour-caddie reads. 🧠'
     : r > 0.9 ? 'sharp course management.'
@@ -138,9 +146,9 @@ export const copy = {
   // ---- first-run onboarding (three cards, under fifteen seconds) ----
   onboardingStep: (n, total) => `Step ${n} of ${total}`,
   onboarding: [
-    { title: 'Aim the ellipse', body: 'This is your shot pattern — you aim the ellipse, not the ball.' },
-    { title: 'Commit the shot', body: 'Commit, then see what the caddie would have done.' },
-    { title: 'Keep score', body: 'Lower strokes-gained loss, higher score.' },
+    { title: 'Aim the ellipse', body: 'Move the mouse — or drag a finger — and the ellipse follows. That is your shot pattern: the ball can finish anywhere inside it.' },
+    { title: 'Commit the shot', body: 'Click the course (or tap Hit it) when you like the shape. The ball flies to one spot from your pattern — then the caddie shows the line they would have picked.' },
+    { title: 'Keep score', body: 'Every target is scored against the caddie’s best line — up to 1,000 points a hole. Closer call, bigger score.' },
   ],
   onboardingNext: 'Next',
   onboardingPlay: "Let's play",
