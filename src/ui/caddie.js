@@ -15,6 +15,7 @@ import { courseName } from '../engine/namer.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
 import { renderCourseArt, drawFlag, drawBall, TILE } from './paint.js';
+import { setHeartbeat, stopHeartbeat } from './sound.js';
 import { copy } from './copy.js';
 
 const HOLES_PER_ROUND = 5;
@@ -114,10 +115,32 @@ function setDanger(pct) {
   const d = Math.min(1, (wet * 2 + trouble) / 90);
   vignetteEl.style.setProperty('--danger', d.toFixed(3));
   vignetteEl.classList.toggle('alarm', wet > 0);
+  // the same danger drives the risk heartbeat while aiming
+  setHeartbeat(d);
 }
 function clearDanger() {
   vignetteEl.style.setProperty('--danger', '0');
   vignetteEl.classList.remove('alarm');
+  stopHeartbeat();
+}
+
+// --- reveal-only camera push-in: a slow cinematic zoom toward the ball,
+// applied to the course wrapper so aim-phase pointer math never sees it ---
+const wrapEl = document.getElementById('wrap');
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)') ?? { matches: false };
+
+function startPushIn(target) {
+  if (reducedMotion.matches || !wrapEl) return;
+  const p = canvasToViewport(toScreen(target));
+  wrapEl.style.transformOrigin = `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`;
+  wrapEl.classList.add('push-in');
+}
+function clearPushIn() {
+  if (!wrapEl) return;
+  // .push-in carries the transition, so removal snaps back instantly:
+  // by the next aim frame the canvas rect is exactly the untransformed one
+  wrapEl.classList.remove('push-in');
+  wrapEl.style.transformOrigin = '';
 }
 
 // --- shot FX: ball-flight comet, then a radial heatmap sweep from the lie ---
@@ -237,6 +260,7 @@ function loadHole() {
   cancelFx();
   hideStamp();
   clearDanger();
+  clearPushIn();
   overlay.classList.remove('show');
   meta.textContent = copy.loadingHole(round.holeIndex + 1, round.count);
   setTimeout(() => {
@@ -564,6 +588,8 @@ function commitDecision() {
   };
   phase = 'reveal';
   clearDanger();
+  // camera: slow push toward where the ball finished (or the replay lie)
+  startPushIn(reveal.landing ?? reveal.from);
   const sg = score.sgLost;
   const outcomeText = copy.outcome[outcome];
   const ballNow = rest.kind === 'rest' ? copy.ballOut(yards(toPin(ball))) : outcomeText;
@@ -621,6 +647,7 @@ function advance() {
   cancelFx();
   hideStamp();
   clearDanger();
+  clearPushIn();
   if (isHoleOver(course, ball) || decisions.length >= 8) return finishHole();
   phase = 'aim';
   aimTarget = null;
