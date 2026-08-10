@@ -4,77 +4,47 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>">
-<title>GolfCMS — Career</title>
+<title>Caddie — Career</title>
+<link rel="stylesheet" href="styles/system.css">
 <style>
-  :root {
-    --bg: #10241a; --panel: #1a3527; --ink: #eaf5ec; --dim: #9db8a5;
-    --accent: #ffd166; --accent2: #6fd08c; --bad: #e07070;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.5 system-ui, sans-serif; padding: 16px;
-    display: flex; flex-direction: column; align-items: center;
-  }
+  body { display: flex; flex-direction: column; align-items: center; }
   main { width: 100%; max-width: 860px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  h1 .t { color: var(--accent); }
-  .sub { color: var(--dim); margin-bottom: 14px; }
-  .sub a { color: var(--accent2); }
-  h2 { font-size: 15px; margin: 0 0 10px; color: var(--ink); }
-  section { background: var(--panel); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
-
-  /* headline tiles */
-  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; background: none; padding: 0; }
-  .tile { background: var(--panel); border-radius: 10px; padding: 12px 14px; }
-  .tile .big { font-size: 26px; font-weight: 700; line-height: 1.2; }
-  .tile .lbl { color: var(--dim); font-size: 12px; margin-top: 2px; }
-
-  /* leak bars */
   .bar-row { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; align-items: center; margin: 6px 0; }
   .bar-row .name { color: var(--dim); font-size: 13px; text-align: right; }
   .bar-track { background: rgba(0,0,0,0.25); border-radius: 4px; height: 18px; position: relative; }
   .bar-fill { height: 100%; border-radius: 4px; min-width: 2px; }
   .bar-row .val { font-variant-numeric: tabular-nums; font-size: 13px; }
-  .callout { margin: 10px 0 0; font-size: 13px; }
-  .callout .hot { color: var(--accent); font-weight: 600; }
-
-  /* verdicts */
-  .verdict { font-size: 13px; margin: 6px 0 0; }
-  .verdict .num { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .callout { margin: 10px 0 0; font-size: 13px; } .callout .hot { color: var(--accent); font-weight: 600; }
+  .verdict { font-size: 13px; margin: 6px 0 0; } .verdict .num { font-weight: 700; font-variant-numeric: tabular-nums; }
   .over { color: var(--bad); } .under { color: var(--accent); } .disciplined { color: var(--accent2); }
-
-  /* sparkline */
-  #spark { width: 100%; height: 130px; display: block; cursor: crosshair; }
+  #spark { width: 100%; height: 130px; cursor: crosshair; }
   .legend { display: flex; gap: 16px; color: var(--dim); font-size: 12px; margin-top: 6px; flex-wrap: wrap; }
   .legend .chip { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
   #spark-read { min-height: 1.2em; color: var(--dim); font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
-
-  /* tables */
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; color: var(--dim); font-weight: 500; padding: 4px 8px; border-bottom: 1px solid #2c5940; }
-  td { padding: 5px 8px; border-bottom: 1px solid rgba(56,102,74,0.35); font-variant-numeric: tabular-nums; }
-  tr:last-child td { border-bottom: none; }
-  td.num, th.num { text-align: right; }
-  .tbl-wrap { overflow-x: auto; }
-
-  /* empty state */
-  #empty { text-align: center; padding: 40px 20px; }
-  #empty .big { font-size: 20px; margin-bottom: 8px; }
-  #empty p { color: var(--dim); max-width: 440px; margin: 0 auto 14px; }
-  #empty a.cta {
-    display: inline-block; background: var(--accent2); color: #10241a; font-weight: 700;
-    padding: 10px 22px; border-radius: 10px; text-decoration: none;
-  }
-  .hidden { display: none; }
+  #empty { text-align: center; padding: 40px 20px; } #empty .big { font-size: 20px; margin-bottom: 8px; } #empty p { color: var(--dim); max-width: 440px; margin: 0 auto 14px; }
 </style>
 </head>
 <body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html" aria-current="page">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
 <main>
-  <h1>GolfCMS 📊 <span class="t">Career</span> — your strokes-gained story</h1>
-  <div class="sub">Every aiming decision you make on the tee and into the green, tallied. <a href="index.html">Game</a> · <a href="audit.html">Audit</a> · <a href="cms.html">CMS</a></div>
+  <h1>Career</h1>
+  <div class="sub">Every aiming decision, tallied as strokes gained — tee shots and approaches alike.</div>
   <div id="app"></div>
 </main>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
 <script type="module" src="src/ui/dash.js"></script>
 </body>
 </html>
