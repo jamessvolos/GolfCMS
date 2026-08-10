@@ -4,26 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🛠️</text></svg>">
-<title>GolfCMS — Hole Editor</title>
+<title>Caddie — Hole Editor</title>
+<link rel="stylesheet" href="styles/system.css">
 <style>
-  :root { --bg: #10241a; --panel: #1a3527; --ink: #eaf5ec; --dim: #9db8a5; --ok: #6fd08c; --accent: #ffd166; }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; padding: 16px; display: flex; flex-direction: column; align-items: center; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--dim); margin-bottom: 12px; }
-  .sub a { color: var(--ok); }
-  #bar, #palette { display: flex; gap: 8px; align-items: center; background: var(--panel); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; flex-wrap: wrap; }
-  button, select, input { background: #234732; color: var(--ink); border: 1px solid #38664a; border-radius: 8px; padding: 6px 10px; font: inherit; cursor: pointer; }
-  button.active { background: var(--ok); color: #10241a; font-weight: 600; }
-  canvas { border-radius: 10px; max-width: 100%; cursor: crosshair; }
+  body { display: flex; flex-direction: column; align-items: center; }
+  #board { cursor: crosshair; }
   #verdict { font-weight: 600; color: var(--accent); min-width: 200px; }
   .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
 </style>
 </head>
 <body>
-<h1>GolfCMS 🛠️ Hole Editor</h1>
-<div class="sub">Start from any generated hole, repaint the ground, certify it, share it as a URL. Tee and cup stay put. <a href="index.html">Game</a> · <a href="cms.html">CMS</a> · <a href="audit.html">Audit</a></div>
-<div id="bar">
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html" aria-current="page">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Hole Editor</h1>
+<div class="sub">Load a hole, repaint the ground, certify it, share it as a URL. Tee and cup stay put.</div>
+<div id="bar" class="panel bar">
   <label>Seed <input id="seed" type="number" value="42" style="width:110px"></label>
   <select id="biome">
     <option value="classic" selected>classic</option>
@@ -39,8 +46,9 @@
   <button id="play" disabled>Play it</button>
   <span id="verdict"></span>
 </div>
-<div id="palette"></div>
+<div id="palette" class="panel bar"></div>
 <canvas id="board" width="960" height="576"></canvas>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
 <script type="module" src="src/ui/editor.js"></script>
 </body>
 </html>

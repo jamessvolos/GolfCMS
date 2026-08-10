@@ -4,26 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🔍</text></svg>">
-<title>GolfCMS — Generator Audit</title>
+<title>Caddie — Generator Audit</title>
+<link rel="stylesheet" href="styles/system.css">
 <style>
-  :root { --bg: #10241a; --panel: #1a3527; --ink: #eaf5ec; --dim: #9db8a5; --ok: #6fd08c; }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; padding: 16px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--dim); margin-bottom: 14px; }
-  .sub a { color: var(--ok); }
-  #controls { display: flex; gap: 8px; align-items: center; background: var(--panel); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; flex-wrap: wrap; }
-  button, select { background: #234732; color: var(--ink); border: 1px solid #38664a; border-radius: 8px; padding: 6px 10px; font: inherit; cursor: pointer; }
-  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+  #grid { --card-min: 220px; gap: var(--sp-2); }
   .cell { background: var(--panel); border-radius: 8px; padding: 6px; }
-  .cell canvas { width: 100%; border-radius: 4px; display: block; cursor: pointer; }
-  .cell .meta { color: var(--dim); font-size: 11px; margin-top: 4px; }
+  .cell canvas { width: 100%; border-radius: 4px; cursor: pointer; }
+  .cell .meta { margin-top: 4px; font-size: 11px; }
 </style>
 </head>
 <body>
-<h1>GolfCMS 🔍 Generator Audit</h1>
-<div class="sub">Fifty seeds at a glance — the fast human check for procedural blandness or broken layouts. Click any course to play it. <a href="index.html">Game</a> · <a href="cms.html">CMS</a></div>
-<div id="controls">
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html" aria-current="page">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Generator Audit</h1>
+<div class="sub">Fifty seeds at a glance — a fast check for blandness or broken layouts. Click any hole to play it.</div>
+<div id="controls" class="panel bar">
   <select id="biome">
     <option value="classic" selected>classic</option>
     <option value="winter">winter</option>
@@ -31,9 +38,10 @@
     <option value="links">links</option>
   </select>
   <button id="reroll">Reroll 50</button>
-  <span id="info" style="color:var(--dim);font-size:12px"></span>
+  <span id="info" class="meta"></span>
 </div>
-<div id="grid"></div>
+<div id="grid" class="grid-cards"></div>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
 <script type="module" src="src/ui/audit.js"></script>
 </body>
 </html>
