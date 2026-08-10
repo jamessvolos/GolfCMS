@@ -7,7 +7,7 @@ import { substream } from '../engine/rng.js';
 import { generateCourse } from '../engine/generate.js';
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell, HANDICAPS, handicapById } from '../engine/dispersion.js';
+import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, HANDICAPS, handicapById } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
@@ -83,7 +83,8 @@ function loadHole() {
     // draw this hole's length from the par-3/4/5 menu, seeded per hole
     const lenRng = substream(seed, 'yardage');
     const band = pickWeighted(lenRng, HOLE_LENGTHS.map((b) => [b, b.weight]));
-    course = generateCourse(seed, 'classic', { holeDistTiles: randInt(lenRng, band.min, band.max) });
+    const biome = lenRng() < 0.28 ? 'links' : 'classic';
+    course = generateCourse(seed, biome, { holeDistTiles: randInt(lenRng, band.min, band.max) });
     const lengthTiles = dist(course.tee, course.hole);
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
@@ -97,7 +98,7 @@ function loadHole() {
     const label = round.daily ? `Daily #${dailyNumber()}` : `Round ${round.seed}`;
     meta.textContent =
       `${label} · hole ${round.holeIndex + 1}/${HOLES_PER_ROUND} · par ${holeInfo.par} · ` +
-      `${holeInfo.yds} yds · ${course.archetype}`;
+      `${holeInfo.yds} yds · ${course.archetype}` + windLabel();
     verdict.textContent =
       `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
     document.getElementById('pattern').textContent = '';
@@ -133,8 +134,9 @@ function ellipsePath(from, target, sigmaScale, k) {
   const d = Math.hypot(target.x - from.x, target.y - from.y) || 0.001;
   const s = sigmas(d, sigmaScale, profile);
   const ang = Math.atan2(target.y - from.y, target.x - from.x);
+  const drift = windShift(course, from, target);
   ctx.beginPath();
-  ctx.ellipse((target.x + 0.5) * TILE, (target.y + 0.5) * TILE,
+  ctx.ellipse((target.x + drift.x + 0.5) * TILE, (target.y + drift.y + 0.5) * TILE,
     s.long * k * TILE, s.lat * k * TILE, ang, 0, Math.PI * 2);
 }
 
@@ -211,6 +213,15 @@ function drawReveal() {
   if (reveal.landing) drawBall(ctx, toScreen(reveal.landing));
   // the post-shot note, inline on the map
   if (reveal.note) drawCallout(ctx, toScreen(reveal.landing ?? reveal.your), reveal.note);
+}
+
+function windLabel() {
+  const w = course.wind ?? { x: 0, y: 0 };
+  if (!w.x && !w.y) return '';
+  const mag = Math.max(Math.abs(w.x), Math.abs(w.y));
+  const dir = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'][
+    ((Math.round(Math.atan2(w.y, w.x) / (Math.PI / 4)) % 8) + 8) % 8];
+  return ` · wind ${mag} ${dir}`;
 }
 
 function setAim(pt) {

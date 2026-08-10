@@ -89,7 +89,9 @@ export const PREVIEW_OFFSETS = (() => {
  * rendering, and the median leave to the hole.
  */
 export function patternStats(course, from, target, sigmaScale, profile = DEFAULT_PROFILE) {
-  const pts = patternPoints(from, target, sigmaScale, PREVIEW_OFFSETS, profile);
+  const drift = windShift(course, from, target);
+  const pts = patternPoints(from, target, sigmaScale, PREVIEW_OFFSETS, profile)
+    .map((p) => ({ x: p.x + drift.x, y: p.y + drift.y }));
   const counts = { fairway: 0, green: 0, rough: 0, sand: 0, trees: 0, wet: 0 };
   const dots = [];
   const leaves = [];
@@ -115,6 +117,18 @@ export function patternStats(course, from, target, sigmaScale, profile = DEFAULT
   return { pct, dots, medianLeave };
 }
 
+/**
+ * Wind drift for a shot: the pattern's CENTER moves downwind, scaled by
+ * carry (a full swing takes the whole gust, a chip barely feels it).
+ */
+export function windShift(course, from, target) {
+  const w = course.wind ?? { x: 0, y: 0 };
+  if (!w.x && !w.y) return { x: 0, y: 0 };
+  const d = Math.hypot(target.x - from.x, target.y - from.y);
+  const k = Math.min(1, d / 10);
+  return { x: w.x * k, y: w.y * k };
+}
+
 /** The one real ball: a seeded gaussian draw from the same ellipse. */
 export function sampleLanding(course, from, target, sigmaScale, strokeIndex, profile = DEFAULT_PROFILE) {
   const rng = substream(course.seed, `caddie:${strokeIndex}`);
@@ -124,7 +138,8 @@ export function sampleLanding(course, from, target, sigmaScale, strokeIndex, pro
   const g1 = mag * Math.cos(2 * Math.PI * u2);
   const g2 = mag * Math.sin(2 * Math.PI * u2);
   const [p] = patternPoints(from, target, sigmaScale, [{ x: g1, y: g2 }], profile);
-  return { x: Math.round(p.x), y: Math.round(p.y) };
+  const drift = windShift(course, from, target);
+  return { x: Math.round(p.x + drift.x), y: Math.round(p.y + drift.y) };
 }
 
 /** Where a landed ball ends up resting, expressed for the strategy layer. */
