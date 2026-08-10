@@ -11,6 +11,7 @@ import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift,
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
+import { courseName } from '../engine/namer.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
 import { renderCourseArt, drawFlag, drawBall, drawCallout, TILE } from './paint.js';
@@ -113,7 +114,7 @@ function loadHole() {
     phase = 'aim';
     const label = round.label ?? (round.daily ? `Daily #${dailyNumber()}` : `Round ${round.seed}`);
     meta.textContent =
-      `${label} · hole ${round.holeIndex + 1}/${round.count} · par ${holeInfo.par} · ` +
+      `${courseName(round.seed)} · ${label} · hole ${round.holeIndex + 1}/${round.count} · par ${holeInfo.par} · ` +
       `${holeInfo.yds} yds · ${course.archetype}` + windLabel();
     verdict.textContent =
       `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
@@ -418,6 +419,7 @@ function commitDecision() {
   };
   const yourRisk = trouble(reveal.your);
   const caddieRisk = trouble(score.optimal);
+  Object.assign(score, { yourRisk, caddieRisk });
   document.getElementById('pattern').innerHTML =
     `Risk taken — your line: <span class="wet">${yourRisk}%</span> trouble ` +
     `(water/sand/trees) · caddie's line: <span class="fw">${caddieRisk}%</span>`;
@@ -464,7 +466,14 @@ function advance() {
 function finishHole() {
   const putts = isHoleOver(course, ball) ? expectedPutts(dist(ball, course.hole)) : 2.5;
   const holePts = Math.round(decisions.reduce((s, d) => s + d.points, 0) / Math.max(1, decisions.length));
-  round.holes.push({ points: holePts, strokes: +(strokes + putts).toFixed(1) });
+  round.holes.push({
+    points: holePts,
+    strokes: +(strokes + putts).toFixed(1),
+    recap: decisions.map((d, i) => ({
+      hole: round.holeIndex + 1, shot: i + 1, sgLost: d.sgLost,
+      risk: d.yourRisk ?? 0, caddieRisk: d.caddieRisk ?? 0,
+    })),
+  });
   round.totalPoints += holePts;
   phase = 'holeover';
   const done = round.holeIndex + 1 >= round.count;
@@ -478,6 +487,19 @@ function finishHole() {
     : `${decisions.length} decisions · est. ${est} strokes on the par-${holeInfo.par} ` +
       `${holeInfo.yds}-yarder (${vsPar >= 0 ? '+' : ''}${vsPar})`;
   document.getElementById('ov-next').textContent = done ? 'New round' : 'Next hole ⛳';
+  const coach = document.getElementById('coach');
+  if (done) {
+    const all = round.holes.flatMap((h) => h.recap ?? []);
+    const worst = all.filter((d) => d.sgLost > 0.05).sort((a, b) => b.sgLost - a.sgLost).slice(0, 2);
+    coach.textContent = worst.length === 0
+      ? "Coach's note: nothing to fix — every target was inside a nickel of optimal. 🧢"
+      : "Coach's notes:\n" + worst.map((d) =>
+          `· Hole ${d.hole}, shot ${d.shot}: −${d.sgLost.toFixed(2)} SG — you took ` +
+          `${d.risk}% trouble where the caddie's line held ${d.caddieRisk}%.`).join('\n');
+    coach.hidden = false;
+  } else {
+    coach.hidden = true;
+  }
   overlay.classList.add('show');
 }
 
@@ -555,6 +577,10 @@ document.getElementById('champ').addEventListener('click', () => {
   const seed = (Math.random() * 0xffffffff) >>> 0;
   startRound(seed, false, { count: 18, label: `Championship ${seed}`, hash: `#/champ/${seed}` });
 });
+
+try {
+  navigator.serviceWorker?.register('sw.js');
+} catch { /* offline support is a bonus, never a requirement */ }
 
 const m = location.hash.match(/^#\/round\/(\d+)/);
 const mc = location.hash.match(/^#\/champ\/(\d+)/);

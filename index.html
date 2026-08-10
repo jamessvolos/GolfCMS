@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🎯</text></svg>">
 <title>GolfCMS — Caddie</title>
 <style>
@@ -69,7 +70,7 @@
 <div id="meta">reading the hole…</div>
 <div id="wrap">
   <canvas id="course" width="960" height="576"></canvas>
-  <div id="overlay"><div class="big"></div><div class="sub"></div>
+  <div id="overlay"><div class="big"></div><div class="sub"></div><div id="coach" hidden style="white-space:pre-line;font-size:13px;color:var(--dim);max-width:460px;text-align:left"></div>
     <div style="display:flex;gap:8px"><button id="ov-share">Copy result</button><button id="ov-next">Next</button></div>
   </div>
 </div>
