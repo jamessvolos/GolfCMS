@@ -6,7 +6,11 @@
 
 import { GREEN, WATER } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
-import { lieParams, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE } from './dispersion.js';
+import {
+  lieParams, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE,
+  PREVIEW_OFFSETS, UNIT_OFFSETS, puttPoints, puttSigmas, puttHolesOut, puttSkill,
+  PUTT_MAX,
+} from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
 
@@ -111,6 +115,197 @@ export function scoreDecision(course, V, from, target, profile = DEFAULT_PROFILE
 /** Is the hole "done" for decision purposes? On the green we hand it to the putt model. */
 export function isHoleOver(course, ball) {
   return cellAt(course, ball.x, ball.y) === GREEN;
+}
+
+// --- putting decisions -------------------------------------------------------
+// On the green the hole is no longer auto-resolved: every putt is a real
+// decision, priced in expected putts by the same machinery as full swings.
+// The decision axis is PACE — how far past the cup to play — so the optimal
+// search runs along the line to the cup, and every candidate is priced by the
+// putt dispersion pattern plus the holing model in dispersion.js.
+
+const PUTT_FRINGE = 2; // tiles of fringe past the green edge a putt may target
+
+/** Can a putt finish (or be aimed) here? On the green or ~2 tiles of fringe. */
+export function onPuttingSurface(course, x, y, fringe = PUTT_FRINGE) {
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  for (let dy = -fringe; dy <= fringe; dy++) {
+    for (let dx = -fringe; dx <= fringe; dx++) {
+      if (dx * dx + dy * dy > fringe * fringe + 0.01) continue;
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (inBounds(course, nx, ny) && cellAt(course, nx, ny) === GREEN) return true;
+    }
+  }
+  return false;
+}
+
+// Expected putts from a raw distance, self-consistent with the holing model:
+// P(d) = 1 + E[P(leave)] under the caddie's own pace policy, iterated to a
+// fixed point on a distance grid and capped at 3 — the "expectedPutts of the
+// leave" recursion, tabulated once per putting-skill level.
+const PUTT_TABLE_STEP = 0.1;
+const PUTT_TABLE_N = Math.round(PUTT_MAX / PUTT_TABLE_STEP) + 1;
+const PACE_CANDIDATES = [0, 0.05, 0.1, 0.15, 0.22, 0.32, 0.45, 0.65];
+const puttTables = new Map(); // skill → Float64Array
+
+function tableLookup(t, d) {
+  const i = d / PUTT_TABLE_STEP;
+  if (i <= 0) return t[0];
+  if (i >= PUTT_TABLE_N - 1) return t[PUTT_TABLE_N - 1];
+  const lo = Math.floor(i);
+  return t[lo] + (t[lo + 1] - t[lo]) * (i - lo);
+}
+
+function buildPuttTable(profile) {
+  const t = new Float64Array(PUTT_TABLE_N);
+  for (let i = 0; i < PUTT_TABLE_N; i++) t[i] = Math.min(3, 1 + 0.5 * i * PUTT_TABLE_STEP);
+  const cup = { x: 0, y: 0 };
+  for (let sweep = 0; sweep < 6; sweep++) {
+    const prev = t.slice();
+    for (let i = 1; i < PUTT_TABLE_N; i++) {
+      const d = i * PUTT_TABLE_STEP;
+      let best = 3;
+      for (const past of PACE_CANDIDATES) {
+        const aim = d + past;
+        const s = puttSigmas(aim, profile);
+        let total = 0;
+        for (const o of UNIT_OFFSETS) {
+          const rolled = Math.max(0, aim + o.y * s.long); // pace along the line
+          const line = o.x * s.lat; // lateral miss at the finish
+          if (puttHolesOut({ x: -d, y: 0 }, { x: rolled - d, y: line }, cup)) continue;
+          total += tableLookup(prev, Math.hypot(rolled - d, line));
+        }
+        best = Math.min(best, 1 + total / UNIT_OFFSETS.length);
+      }
+      t[i] = Math.min(3, best);
+    }
+  }
+  return t;
+}
+
+/** Expected putts to hole out from `d` tiles, playing the caddie's pace. */
+export function puttsFrom(d, profile = DEFAULT_PROFILE) {
+  const key = puttSkill(profile).toFixed(4);
+  let t = puttTables.get(key);
+  if (!t) {
+    t = buildPuttTable(profile);
+    puttTables.set(key, t);
+  }
+  return tableLookup(t, d);
+}
+
+/** Cost of one non-holed putt sample finishing at `p`. */
+function puttLeaveCost(course, V, from, p, profile) {
+  const rest = restingCell(course, p.x, p.y);
+  if (rest.kind !== 'rest') {
+    // raced it clean off the green into a pond: penalty, replay the putt
+    return PENALTY + puttsFrom(Math.hypot(from.x - course.hole.x, from.y - course.hole.y), profile);
+  }
+  if (rest.terrain === GREEN) {
+    // still on the dance floor: the fractional leave distance is what matters
+    return puttsFrom(Math.hypot(p.x - course.hole.x, p.y - course.hole.y), profile);
+  }
+  // rolled into the collar/fringe: back to a chip, priced by the field
+  const v = V ? V[rest.y * course.width + rest.x] : NaN;
+  return Number.isFinite(v) ? v : 3;
+}
+
+/**
+ * Expected putts from this decision: the stroke itself plus the mean, over
+ * PREVIEW-style fixed offsets, of (holed ? 0 : putts-remaining from the
+ * leave). Infinity for targets off the green+fringe surface or past the cap.
+ */
+export function evaluatePutt(course, V, from, target, profile = DEFAULT_PROFILE) {
+  const d = Math.hypot(target.x - from.x, target.y - from.y);
+  if (d < 0.02 || d > PUTT_MAX + 0.01) return Infinity;
+  if (!onPuttingSurface(course, target.x, target.y)) return Infinity;
+  const pts = puttPoints(from, target, profile, PREVIEW_OFFSETS);
+  let total = 0;
+  for (const p of pts) {
+    if (puttHolesOut(from, p, course.hole)) continue; // drops: no further cost
+    total += puttLeaveCost(course, V, from, p, profile);
+  }
+  return 1 + total / pts.length;
+}
+
+// Pace grid for the optimal-putt search: tiles past (or short of) the cup.
+const PUTT_PACE_GRID = [-0.6, -0.4, -0.25, -0.15, -0.08, 0, 0.05, 0.1, 0.16, 0.24, 0.34, 0.5, 0.7, 1.0, 1.4, 1.9];
+
+/**
+ * Optimal putt target: a small grid search along the line to the cup — on a
+ * flat green line is free, PACE is the whole decision — over aims from well
+ * short to aggressively past. @returns {{target:{x,y}, value, past}}
+ */
+export function bestPutt(course, V, from, profile = DEFAULT_PROFILE) {
+  const cup = course.hole;
+  const d = Math.hypot(cup.x - from.x, cup.y - from.y) || 0.001;
+  const ux = (cup.x - from.x) / d;
+  const uy = (cup.y - from.y) / d;
+  let best = { target: { x: cup.x, y: cup.y }, value: Infinity, past: 0 };
+  for (const past of PUTT_PACE_GRID) {
+    const aim = Math.min(PUTT_MAX, d + past);
+    if (aim < 0.05) continue;
+    const target = { x: from.x + ux * aim, y: from.y + uy * aim };
+    const value = evaluatePutt(course, V, from, target, profile);
+    if (value < best.value) best = { target, value, past: aim - d };
+  }
+  return best;
+}
+
+/** Score one putt decision, mirroring scoreDecision: SG lost vs the caddie's
+ *  read, 1000-point exponential. E's are expected PUTTS from here. */
+export function scorePuttDecision(course, V, from, target, profile = DEFAULT_PROFILE) {
+  const optimal = bestPutt(course, V, from, profile);
+  const raw = evaluatePutt(course, V, from, target, profile);
+  const yourE = Number.isFinite(raw) ? raw : optimal.value + 2; // off-surface aim: priced as a blunder
+  const sgLost = Math.max(0, yourE - optimal.value);
+  const points = Math.round(1000 * Math.exp(-3 * sgLost));
+  return { yourE, optimalE: optimal.value, sgLost, points, optimal: optimal.target, optimalPast: optimal.past };
+}
+
+/** Live putt intelligence for the HUD: make %, three-putt risk, sample dots. */
+export function puttStats(course, from, target, profile = DEFAULT_PROFILE) {
+  const pts = puttPoints(from, target, profile, PREVIEW_OFFSETS);
+  const dots = [];
+  const leaves = [];
+  let make = 0;
+  let three = 0;
+  for (const p of pts) {
+    if (puttHolesOut(from, p, course.hole)) {
+      make++;
+      dots.push({ x: p.x, y: p.y, outcome: 'holed' });
+      continue;
+    }
+    const leave = Math.hypot(p.x - course.hole.x, p.y - course.hole.y);
+    leaves.push(leave);
+    // chance this leave misses too — the three-putt seed
+    three += Math.min(1, Math.max(0, puttsFrom(leave, profile) - 1));
+    dots.push({ x: p.x, y: p.y, outcome: 'left' });
+  }
+  leaves.sort((a, b) => a - b);
+  return {
+    makePct: Math.round((make / pts.length) * 100),
+    threePct: Math.round((three / pts.length) * 100),
+    medianLeave: leaves.length ? leaves[Math.floor(leaves.length / 2)] : null,
+    dots,
+  };
+}
+
+/** Heat data for the putt reveal: expected putts for each green/fringe cell. */
+export function puttHeatmap(course, V, from, profile = DEFAULT_PROFILE) {
+  const cells = [];
+  const r = Math.ceil(PUTT_MAX);
+  for (let ty = Math.max(0, Math.round(from.y) - r); ty < Math.min(course.height, Math.round(from.y) + r + 1); ty++) {
+    for (let tx = Math.max(0, Math.round(from.x) - r); tx < Math.min(course.width, Math.round(from.x) + r + 1); tx++) {
+      if (cellAt(course, tx, ty) === WATER) continue;
+      if (!onPuttingSurface(course, tx, ty)) continue;
+      const e = evaluatePutt(course, V, from, { x: tx, y: ty }, profile);
+      if (Number.isFinite(e)) cells.push({ x: tx, y: ty, e });
+    }
+  }
+  return cells;
 }
 
 /** Heat data for the reveal: expected total strokes for each aim candidate. */

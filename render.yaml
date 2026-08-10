@@ -1,0 +1,15 @@
+# Render blueprint for the GolfCMS leaderboard (free tier friendly).
+# One-click: connect this repo on render.com and it picks this file up.
+# Note: the free tier has an ephemeral disk and sleeps when idle — boards
+# reset on redeploy/sleep unless you attach a paid persistent disk and set
+# GOLFCMS_BOARD_FILE to a path on it.
+services:
+  - type: web
+    name: golfcms-leaderboard
+    runtime: docker
+    plan: free
+    envVars:
+      # The server listens on 8787 (it ignores Render's injected PORT);
+      # declaring PORT tells Render where to route traffic.
+      - key: PORT
+        value: "8787"

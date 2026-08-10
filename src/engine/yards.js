@@ -9,6 +9,11 @@ export function yards(tiles) {
   return Math.round(tiles * YARDS_PER_TILE);
 }
 
+/** Tiles → whole feet, for the green: 1 tile = 16 yds = 48 ft. */
+export function feet(tiles) {
+  return Math.round(tiles * YARDS_PER_TILE * 3);
+}
+
 /** Hole yardage for the scorecard, rounded to the traditional 5. */
 export function holeYards(tiles) {
   return Math.round((tiles * YARDS_PER_TILE) / 5) * 5;

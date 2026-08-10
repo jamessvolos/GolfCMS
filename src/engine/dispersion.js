@@ -156,6 +156,84 @@ export function sampleLanding(course, from, target, sigmaScale, strokeIndex, pro
   return { x: Math.round(p.x + drift.x), y: Math.round(p.y + drift.y) };
 }
 
+// --- putting -----------------------------------------------------------------
+// The putt pattern INVERTS the full-swing shape: pace (depth) error dominates
+// and line (lateral) error is small — a putt misses long/short far more than
+// wide. Skill scales by sqrt(profile.base): bad ballstrikers aren't equally
+// bad putters. All distances in tiles (1 tile = 16 yds = 48 ft).
+
+export const PUTT_MAX = 20; // tiles — the longest roll the caddie will line up
+// Capture: a roll that passes this close to the cup with holeable pace drops.
+// Tuned against the make-rate contract (3-footers near-automatic, 60-footers
+// roughly one-in-three) rather than physical cup size — this is game scale.
+export const CUP_R = 0.058; // tiles
+export const PUTT_OVERRUN = 2.5; // tiles — pace that races farther past never drops
+
+/** Putting skill factor: sqrt of the full-swing base. */
+export function puttSkill(profile = DEFAULT_PROFILE) {
+  return Math.sqrt(profile.base ?? 1);
+}
+
+/** Putt ellipse semi-axes (tiles): long axis is PACE, short axis is LINE. */
+export function puttSigmas(dist, profile = DEFAULT_PROFILE) {
+  const s = puttSkill(profile);
+  return {
+    long: (0.08 + dist * 0.10) * s, // pace (depth) — the real miss on the green
+    lat: (0.04 + dist * 0.045) * s, // line (lateral) — comparatively tight
+  };
+}
+
+/** Finishing points for a putt from `from` rolled at `target`, one per offset. */
+export function puttPoints(from, target, profile = DEFAULT_PROFILE, offsets = UNIT_OFFSETS) {
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  const dist = Math.hypot(dx, dy) || 0.001;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const s = puttSigmas(dist, profile);
+  return offsets.map((o) => ({
+    x: target.x + ux * o.y * s.long - uy * o.x * s.lat,
+    y: target.y + uy * o.y * s.long + ux * o.x * s.lat,
+  }));
+}
+
+/**
+ * Did a roll from `from` finishing at `finish` drop? The ball must actually
+ * reach the cup (a putt dying at the front door still counts), must not be
+ * pacing more than PUTT_OVERRUN past, and must pass within the cup's capture
+ * width — which SHRINKS with overrun speed: a racing putt lips out. That
+ * gradient is the aggressive-lag trade-off: pace past the hole raises make%
+ * up to a point, then costs both the make and the comeback.
+ */
+export function puttHolesOut(from, finish, cup) {
+  const vx = finish.x - from.x;
+  const vy = finish.y - from.y;
+  const len = Math.hypot(vx, vy);
+  if (len < 1e-9) return Math.hypot(cup.x - from.x, cup.y - from.y) <= CUP_R;
+  const ux = vx / len;
+  const uy = vy / len;
+  const along = (cup.x - from.x) * ux + (cup.y - from.y) * uy; // cup's station on the roll line
+  if (len < along - 1e-9) return false; // died short of the hole
+  const over = len - along; // how far past the cup this pace carries
+  if (over > PUTT_OVERRUN) return false;
+  const capture = CUP_R * (1 - Math.max(0, over) / PUTT_OVERRUN);
+  const off = Math.abs(-(cup.x - from.x) * uy + (cup.y - from.y) * ux); // line miss at the cup
+  return off <= capture;
+}
+
+/** The one real roll: a seeded gaussian draw from the putt ellipse. No wind —
+ *  the ball is on the ground. Fractional finish: inches matter on the green. */
+export function samplePuttRoll(course, from, target, strokeIndex, profile = DEFAULT_PROFILE) {
+  const rng = substream(course.seed, `putt:${strokeIndex}`);
+  const u1 = Math.max(rng(), 1e-9);
+  const u2 = rng();
+  const mag = Math.sqrt(-2 * Math.log(u1));
+  const g1 = mag * Math.cos(2 * Math.PI * u2);
+  const g2 = mag * Math.sin(2 * Math.PI * u2);
+  const [p] = puttPoints(from, target, profile, [{ x: g1, y: g2 }]);
+  return { x: p.x, y: p.y };
+}
+
 /** Where a landed ball ends up resting, expressed for the strategy layer. */
 export function restingCell(course, x, y) {
   const cx = Math.round(x);
