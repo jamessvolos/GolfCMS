@@ -421,6 +421,20 @@ function commitDecision() {
   document.getElementById('pattern').innerHTML =
     `Risk taken — your line: <span class="wet">${yourRisk}%</span> trouble ` +
     `(water/sand/trees) · caddie's line: <span class="fw">${caddieRisk}%</span>`;
+  // career log: every decision, forever (well, the last 2000)
+  try {
+    const KEY = 'golfcms.caddie.log.v1';
+    const log = JSON.parse(localStorage.getItem(KEY)) ?? [];
+    log.push({
+      at: Date.now(), round: round.seed, hole: round.holeIndex + 1, shot: decisions.length,
+      par: holeInfo.par, holeYds: holeInfo.yds,
+      category: decisions.length === 1 ? 'tee' : 'approach',
+      sgLost: +sg.toFixed(3), points: score.points,
+      risk: yourRisk, caddieRisk, hcp: profile.id,
+    });
+    if (log.length > 2000) log.splice(0, log.length - 2000);
+    localStorage.setItem(KEY, JSON.stringify(log));
+  } catch { /* storage blocked: career stats are best-effort */ }
   // inline post-shot note, pinned to where the ball finished
   reveal.note = {
     title: sg < 0.02 ? 'Caddie-approved' : sg < 0.08 ? 'Good call' : sg < 0.2 ? 'Loose' : 'Costly',
