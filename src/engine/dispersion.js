@@ -231,7 +231,83 @@ export function samplePuttRoll(course, from, target, strokeIndex, profile = DEFA
   const g1 = mag * Math.cos(2 * Math.PI * u2);
   const g2 = mag * Math.sin(2 * Math.PI * u2);
   const [p] = puttPoints(from, target, profile, [{ x: g1, y: g2 }]);
-  return { x: p.x, y: p.y };
+  const br = puttBreakDrift(course, from, p);
+  return { x: p.x + br.x, y: p.y + br.y };
+}
+
+// --- green reading -----------------------------------------------------------
+// Slope tiles bend a rolling ball. A putt whose line passes over or beside a
+// slope tile picks up lateral drift toward the downhill direction — the
+// classic cross-slope break. Flat courses (no slope tiles anywhere) take the
+// exact arithmetic they always did: zero drift is the additive identity, so
+// classic-green behavior is byte-identical to the pre-break engine.
+
+export const BREAK_RATE = 0.12; // lateral tiles of drift per tile rolled on a full cross-slope
+const BREAK_STEP = 0.5; // sampling interval along the roll line (tiles)
+
+const slopedCourseCache = new WeakMap();
+/** Does this course contain any slope tiles at all? Cached per course object
+ *  (courses are regenerate-not-mutate, per course.js). */
+export function courseHasSlopes(course) {
+  let has = slopedCourseCache.get(course);
+  if (has === undefined) {
+    has = course.cells.some((t) => slopeDir(t) !== null);
+    slopedCourseCache.set(course, has);
+  }
+  return has;
+}
+
+/** Downhill pull at a fractional point: the tile under the ball plus its four
+ *  neighbors — a slope ON or ADJACENT to the line still grabs the roll. */
+function slopePull(course, x, y) {
+  const cx = Math.round(x);
+  const cy = Math.round(y);
+  let px = 0;
+  let py = 0;
+  const add = (tx, ty, w) => {
+    if (!inBounds(course, tx, ty)) return;
+    const d = slopeDir(cellAt(course, tx, ty));
+    if (d) {
+      px += d.x * w;
+      py += d.y * w;
+    }
+  };
+  add(cx, cy, 1);
+  add(cx + 1, cy, 0.35);
+  add(cx - 1, cy, 0.35);
+  add(cx, cy + 1, 0.35);
+  add(cx, cy - 1, 0.35);
+  return { x: px, y: py };
+}
+
+/**
+ * Accumulated break for a roll from `from` finishing at `finish`: the
+ * cross-line component of downhill pull, integrated along the line, scaled by
+ * BREAK_RATE. Pull ALONG the line is pace, and pace error is already priced
+ * by the putt ellipse — only the lateral component becomes break.
+ * @returns {{x:number, y:number, cross:number}} drift vector plus its signed
+ * magnitude (positive = drifts to the right of the roll direction, screen coords).
+ */
+export function puttBreakDrift(course, from, finish) {
+  if (!courseHasSlopes(course)) return { x: 0, y: 0, cross: 0 };
+  const dx = finish.x - from.x;
+  const dy = finish.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return { x: 0, y: 0, cross: 0 };
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy; // unit normal: the right-hand side of the roll direction
+  const ny = ux;
+  const steps = Math.max(1, Math.ceil(len / BREAK_STEP));
+  const dl = len / steps;
+  let cross = 0;
+  for (let i = 0; i < steps; i++) {
+    const t = (i + 0.5) * dl;
+    const g = slopePull(course, from.x + ux * t, from.y + uy * t);
+    cross += (g.x * nx + g.y * ny) * dl;
+  }
+  cross *= BREAK_RATE;
+  return { x: nx * cross, y: ny * cross, cross };
 }
 
 /** Where a landed ball ends up resting, expressed for the strategy layer. */

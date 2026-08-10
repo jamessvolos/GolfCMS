@@ -9,7 +9,7 @@ import { cellAt, inBounds } from './course.js';
 import {
   lieParams, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE,
   PREVIEW_OFFSETS, UNIT_OFFSETS, puttPoints, puttSigmas, puttHolesOut, puttSkill,
-  PUTT_MAX,
+  PUTT_MAX, puttBreakDrift,
 } from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
@@ -224,8 +224,10 @@ export function evaluatePutt(course, V, from, target, profile = DEFAULT_PROFILE)
   const pts = puttPoints(from, target, profile, PREVIEW_OFFSETS);
   let total = 0;
   for (const p of pts) {
-    if (puttHolesOut(from, p, course.hole)) continue; // drops: no further cost
-    total += puttLeaveCost(course, V, from, p, profile);
+    const br = puttBreakDrift(course, from, p); // slope tiles bend the roll
+    const q = { x: p.x + br.x, y: p.y + br.y };
+    if (puttHolesOut(from, q, course.hole)) continue; // drops: no further cost
+    total += puttLeaveCost(course, V, from, q, profile);
   }
   return 1 + total / pts.length;
 }
@@ -233,23 +235,41 @@ export function evaluatePutt(course, V, from, target, profile = DEFAULT_PROFILE)
 // Pace grid for the optimal-putt search: tiles past (or short of) the cup.
 const PUTT_PACE_GRID = [-0.6, -0.4, -0.25, -0.15, -0.08, 0, 0.05, 0.1, 0.16, 0.24, 0.34, 0.5, 0.7, 1.0, 1.4, 1.9];
 
+// Cross-line grid for breaking putts: tiles of aim-off either side of the cup
+// line. Only searched when the line to the cup actually breaks — on a flat
+// green the lateral term stays [0] and the search is exactly the classic one.
+const PUTT_LATERAL_GRID = [
+  0, 0.06, -0.06, 0.12, -0.12, 0.2, -0.2, 0.3, -0.3, 0.45, -0.45, 0.65, -0.65, 0.9, -0.9, 1.3, -1.3,
+];
+
 /**
  * Optimal putt target: a small grid search along the line to the cup — on a
  * flat green line is free, PACE is the whole decision — over aims from well
- * short to aggressively past. @returns {{target:{x,y}, value, past}}
+ * short to aggressively past. When the cup line breaks (slope tiles on or
+ * beside it), the search also slides ACROSS the line, so the caddie's answer
+ * plays the break: the optimal target sits aimed off the cup, upslope.
+ * @returns {{target:{x,y}, value, past}}
  */
 export function bestPutt(course, V, from, profile = DEFAULT_PROFILE) {
   const cup = course.hole;
   const d = Math.hypot(cup.x - from.x, cup.y - from.y) || 0.001;
-  const ux = (cup.x - from.x) / d;
-  const uy = (cup.y - from.y) / d;
+  // ball at the cup lip (a shot that landed dead on the hole cell): there is
+  // no line to normalize, so take any — the tap-in is pure pace. Without this
+  // the direction vector degenerates to (0,0) and every candidate prices as
+  // Infinity, which used to poison the decision score with NaN points.
+  const ux = d < 0.01 ? 1 : (cup.x - from.x) / d;
+  const uy = d < 0.01 ? 0 : (cup.y - from.y) / d;
+  const breaks = Math.abs(puttBreakDrift(course, from, cup).cross) > 1e-9;
+  const laterals = breaks ? PUTT_LATERAL_GRID : [0];
   let best = { target: { x: cup.x, y: cup.y }, value: Infinity, past: 0 };
   for (const past of PUTT_PACE_GRID) {
     const aim = Math.min(PUTT_MAX, d + past);
     if (aim < 0.05) continue;
-    const target = { x: from.x + ux * aim, y: from.y + uy * aim };
-    const value = evaluatePutt(course, V, from, target, profile);
-    if (value < best.value) best = { target, value, past: aim - d };
+    for (const lat of laterals) {
+      const target = { x: from.x + ux * aim - uy * lat, y: from.y + uy * aim + ux * lat };
+      const value = evaluatePutt(course, V, from, target, profile);
+      if (value < best.value) best = { target, value, past: aim - d };
+    }
   }
   return best;
 }
@@ -273,16 +293,18 @@ export function puttStats(course, from, target, profile = DEFAULT_PROFILE) {
   let make = 0;
   let three = 0;
   for (const p of pts) {
-    if (puttHolesOut(from, p, course.hole)) {
+    const br = puttBreakDrift(course, from, p); // slope tiles bend the roll
+    const q = { x: p.x + br.x, y: p.y + br.y };
+    if (puttHolesOut(from, q, course.hole)) {
       make++;
-      dots.push({ x: p.x, y: p.y, outcome: 'holed' });
+      dots.push({ x: q.x, y: q.y, outcome: 'holed' });
       continue;
     }
-    const leave = Math.hypot(p.x - course.hole.x, p.y - course.hole.y);
+    const leave = Math.hypot(q.x - course.hole.x, q.y - course.hole.y);
     leaves.push(leave);
     // chance this leave misses too — the three-putt seed
     three += Math.min(1, Math.max(0, puttsFrom(leave, profile) - 1));
-    dots.push({ x: p.x, y: p.y, outcome: 'left' });
+    dots.push({ x: q.x, y: q.y, outcome: 'left' });
   }
   leaves.sort((a, b) => a - b);
   return {

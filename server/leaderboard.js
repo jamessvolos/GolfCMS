@@ -15,6 +15,8 @@ import { pathToFileURL } from 'node:url';
 import { makePuzzle, DIFFICULTIES } from '../src/engine/puzzle.js';
 import { BIOMES } from '../src/engine/generate.js';
 import { decodeReplay, ghostPath } from '../src/engine/replay.js';
+import { decodeCaddieRound, verifyCaddieRound, MAX_RECORD_HOLES } from '../src/engine/caddierec.js';
+import { HANDICAPS } from '../src/engine/dispersion.js';
 
 const MAX_BODY = 64 * 1024;
 const BOARD_CAP = 20;
@@ -52,6 +54,16 @@ export function createServer(options = {}) {
 
     if (req.method === 'GET' && parts.length === 4 && parts[0] === 'scores') {
       handleList(parts[1], parts[2], parts[3], res, boards);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/caddie-scores') {
+      readBody(req, res, (body) => handleCaddieSubmit(body, res, boards, file));
+      return;
+    }
+
+    if (req.method === 'GET' && parts.length === 4 && parts[0] === 'caddie-scores') {
+      handleCaddieList(parts[1], parts[2], parts[3], res, boards);
       return;
     }
 
@@ -139,6 +151,77 @@ function handleList(seedStr, difficulty, biome, res, boards) {
   sendJSON(res, 200, {
     board: board.map(({ name, strokes, at }) => ({ name, strokes, at })),
     par: puzzle.par,
+  });
+}
+
+// --- Caddie scoreboard v2 ----------------------------------------------------
+// Same philosophy as /scores: the submission is a decision record, and the
+// points are whatever verifyCaddieRound() recomputes by full replay against
+// the round seed. Any points a client claims are never even looked at.
+
+function handleCaddieSubmit(raw, res, boards, file) {
+  let body;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return sendJSON(res, 400, { error: 'malformed JSON' });
+  }
+  if (typeof body !== 'object' || body === null) {
+    return sendJSON(res, 400, { error: 'body must be a JSON object' });
+  }
+  if (typeof body.record !== 'string' || body.record.length === 0) {
+    return sendJSON(res, 400, { error: 'record must be a non-empty string' });
+  }
+  if (body.name !== undefined && typeof body.name !== 'string') {
+    return sendJSON(res, 400, { error: 'name must be a string' });
+  }
+  const name = cleanName(body.name);
+
+  let record;
+  try {
+    record = decodeCaddieRound(body.record); // shape/codec errors: 400
+  } catch (err) {
+    return sendJSON(res, 400, { error: String(err.message ?? err) });
+  }
+  let result;
+  try {
+    result = verifyCaddieRound(record); // replay failures: 422, like /scores
+  } catch (err) {
+    return sendJSON(res, 422, { error: String(err.message ?? err) });
+  }
+
+  const key = `caddie/${record.roundSeed}/${record.count}/${record.hcp}`;
+  const board = boards.get(key) ?? [];
+  const entry = { name, points: result.totalPoints, at: Date.now() };
+  board.push(entry);
+  board.sort((a, b) => b.points - a.points || a.at - b.at);
+  board.length = Math.min(board.length, BOARD_CAP);
+  boards.set(key, board);
+  if (file) saveBoards(file, boards);
+
+  const rank = board.indexOf(entry) + 1; // 0 if capped off the board
+  sendJSON(res, 200, {
+    rank: rank || board.length + 1,
+    of: board.length,
+    points: result.totalPoints,
+  });
+}
+
+function handleCaddieList(seedStr, countStr, hcp, res, boards) {
+  const seed = Number(seedStr);
+  const count = Number(countStr);
+  if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
+    return sendJSON(res, 400, { error: 'roundSeed must be a uint32' });
+  }
+  if (!Number.isInteger(count) || count < 1 || count > MAX_RECORD_HOLES) {
+    return sendJSON(res, 400, { error: `count must be 1..${MAX_RECORD_HOLES}` });
+  }
+  if (!HANDICAPS.some((h) => h.id === hcp)) {
+    return sendJSON(res, 400, { error: 'unknown handicap id' });
+  }
+  const board = boards.get(`caddie/${seed}/${count}/${hcp}`) ?? [];
+  sendJSON(res, 200, {
+    board: board.map(({ name, points, at }) => ({ name, points, at })),
   });
 }
 

@@ -3,17 +3,15 @@
 // not a perfect strike — decides where the ball goes; every choice is scored
 // in strokes gained against the optimal target, with a full reveal.
 
-import { substream } from '../engine/rng.js';
-import { generateCourse } from '../engine/generate.js';
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX } from '../engine/dispersion.js';
+import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX, puttBreakDrift, CUP_R } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, isHoleOver, scorePuttDecision, puttHeatmap, puttStats, onPuttingSurface } from '../engine/strategy.js';
+import { caddieHoleSeed, caddieHoleCourse, encodeCaddieRound } from '../engine/caddierec.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
-import { yards, feet, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
-import { pickWeighted, randInt } from '../engine/rng.js';
+import { yards, feet, holeYards, parForTiles, clubName } from '../engine/yards.js';
 import { renderCourseArt, drawFlag, drawBall, TILE } from './paint.js';
 import { setHeartbeat, stopHeartbeat } from './sound.js';
 import { copy } from './copy.js';
@@ -47,6 +45,9 @@ let putting = false; // in the putt decision loop
 let puttPos = null; // fractional ball position on the green (inches matter)
 let puttCount = 0; // putt decisions taken this hole
 let holedOut = false; // the ball is in the cup — hole strokes are real
+// per-round decision recorder: every committed target, hole by hole, so a
+// finished round can be offered to the leaderboard as a verifiable replay
+let recHole = null; // {holeSeed, decisions:[{x,y}], puttDecisions:[{x,y}]}
 function resolveProfile(id) {
   if (id === 'custom') {
     try {
@@ -241,6 +242,7 @@ function startRound(seed, daily, opts = {}) {
   round = {
     seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0,
     count: opts.count ?? HOLES_PER_ROUND, label: opts.label ?? null, hash: opts.hash ?? null,
+    rec: [], // completed holes' decision records, for the board submission
   };
   location.hash = round.hash ?? (daily ? '#/daily' : `#/round/${round.seed}`);
   syncModeSelect();
@@ -255,13 +257,6 @@ function syncModeSelect() {
     : 'quick';
 }
 
-function holeSeed(i) {
-  const rng = substream(round.seed, 'caddieround');
-  let s = 0;
-  for (let k = 0; k <= i; k++) s = Math.floor(rng() * 0xffffffff) >>> 0;
-  return s;
-}
-
 function loadHole() {
   phase = 'loading';
   cancelFx();
@@ -271,12 +266,11 @@ function loadHole() {
   overlay.classList.remove('show');
   meta.textContent = copy.loadingHole(round.holeIndex + 1, round.count);
   setTimeout(() => {
-    const seed = holeSeed(round.holeIndex);
-    // draw this hole's length from the par-3/4/5 menu, seeded per hole
-    const lenRng = substream(seed, 'yardage');
-    const band = pickWeighted(lenRng, HOLE_LENGTHS.map((b) => [b, b.weight]));
-    const biome = lenRng() < 0.28 ? 'links' : 'classic';
-    course = generateCourse(seed, biome, { holeDistTiles: randInt(lenRng, band.min, band.max) });
+    // hole derivation lives in caddierec.js — the SAME helpers the
+    // leaderboard verifier replays against, so they can never drift
+    const seed = caddieHoleSeed(round.seed, round.holeIndex);
+    course = caddieHoleCourse(seed);
+    recHole = { holeSeed: seed, decisions: [], puttDecisions: [] };
     const lengthTiles = dist(course.tee, course.hole);
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
@@ -548,7 +542,15 @@ function updatePuttReadout() {
   const toCup = toPin(puttPos);
   const stats = puttStats(course, puttPos, aimTarget, profile);
   const paceFt = (d - toCup) * 48; // + past the cup, − short (along your line)
-  verdict.textContent = copy.puttAim({ ft: feet(toCup), pace: copy.paceCall(paceFt), make: stats.makePct });
+  // green reading: when slope bends this line, the caddie says so out loud
+  const br = puttBreakDrift(course, puttPos, aimTarget);
+  let breakNote = '';
+  if (Math.abs(br.cross) > CUP_R * 0.5) {
+    const side = br.cross > 0 ? 'right' : 'left';
+    const cups = Math.round(Math.abs(br.cross) / (CUP_R * 2));
+    breakNote = copy.puttBreakNote(side, cups);
+  }
+  verdict.textContent = copy.puttAim({ ft: feet(toCup), pace: copy.paceCall(paceFt), make: stats.makePct }) + breakNote;
   document.getElementById('pattern').innerHTML = proMode
     ? copy.proPattern
     : copy.puttPatternLine({
@@ -685,6 +687,7 @@ function commitDecision() {
   const heat = aimHeatmap(course, V, from, 1, profile);
   const land = sampleLanding(course, from, aimTarget, lie.sigmaScale, strokes, profile);
   const rest = restingCell(course, land.x, land.y);
+  recHole?.decisions.push({ x: aimTarget.x, y: aimTarget.y }); // for the replay record
   strokes += 1;
   let outcome;
   if (rest.kind === 'rest') {
@@ -767,6 +770,7 @@ function commitPutt() {
   const heat = puttHeatmap(course, V, from, profile);
   const roll = samplePuttRoll(course, from, target, strokes, profile);
   const holed = puttHolesOut(from, roll, course.hole);
+  recHole?.puttDecisions.push({ x: target.x, y: target.y }); // for the replay record
   strokes += 1;
   puttCount += 1;
   let outcome;
@@ -911,6 +915,11 @@ function recordDailyStreak() {
 }
 
 function finishHole() {
+  // bank this hole's decision record for the round submission
+  if (recHole) {
+    round.rec?.push(recHole);
+    recHole = null;
+  }
   // holed out: the card shows REAL strokes, actual putts included. Only a
   // hole abandoned at the decision cap still gets the old 2.5-putt estimate.
   const total = holedOut ? strokes : strokes + 2.5;
@@ -973,6 +982,39 @@ function finishHole() {
     coach.hidden = true;
   }
   overlay.classList.add('show');
+  if (done) submitRoundToBoard(round); // silent, optional, never blocks the UI
+}
+
+/** Offer the finished round to the leaderboard, if one is configured. The
+ *  payload is the decision record — the server replays it and computes the
+ *  points itself. Every failure mode is silent: the board is a bonus. */
+async function submitRoundToBoard(r) {
+  let url = null;
+  try {
+    url = localStorage.getItem('golfcms.leaderboard.url');
+  } catch {
+    return; // storage blocked: no board configured
+  }
+  if (!url || !Array.isArray(r?.rec) || r.rec.length !== r.count) return;
+  try {
+    const record = encodeCaddieRound({
+      roundSeed: r.seed, count: r.count, hcp: profile.id, holes: r.rec,
+    }); // throws for custom profiles — the board only takes known handicaps
+    const res = await fetch(`${url.replace(/\/+$/, '')}/caddie-scores`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!Number.isInteger(data?.rank) || !Number.isInteger(data?.of)) return;
+    // still on this round's final overlay? append the rank to the sub line
+    if (round === r && phase === 'holeover') {
+      overlay.querySelector('.sub').textContent += ` · ${copy.boardRank(data.rank, data.of)}`;
+    }
+  } catch {
+    /* offline, misconfigured, or rejected: the round result stands alone */
+  }
 }
 
 function shareText() {
