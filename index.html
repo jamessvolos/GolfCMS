@@ -2,117 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🎯</text></svg>">
 <title>Caddie — Play</title>
 <link rel="stylesheet" href="styles/system.css">
-<style>
-  [hidden] { display: none !important; }
-  body { display: flex; flex-direction: column; align-items: center; padding: 12px 16px; }
-  #status, #caddie-line, #actions, #custom-panel { width: 100%; max-width: 960px; }
-
-  /* status strip: hole identity left, the one hero number right */
-  #status {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: var(--sp-3); padding: 8px 14px; margin-bottom: var(--sp-2);
-  }
-  #meta { color: var(--dim); font-size: 13px; }
-  #score { font-weight: 600; font-size: 13px; margin-top: 2px; }
-  .status-pin { text-align: right; white-space: nowrap; }
-  #topin {
-    display: block; font-size: 34px; font-weight: 700; line-height: 1.1;
-    color: var(--accent); font-variant-numeric: tabular-nums;
-  }
-  .pin-lbl { color: var(--dim); font-size: var(--fs-caption); text-transform: uppercase; letter-spacing: 1px; }
-
-  /* map */
-  #wrap { position: relative; max-width: 100%; }
-  #course { cursor: crosshair; height: auto; touch-action: none; }
-
-  /* one caddie message line */
-  #caddie-line { margin: var(--sp-2) 0 0; min-height: 2.9em; }
-  #verdict { color: var(--accent); font-size: 14px; }
-  #pattern { color: var(--dim); font-size: 13px; }
-  #caddie-line .wet { color: var(--bad); font-weight: 600; }
-  #caddie-line .fw { color: var(--accent2); }
-
-  /* action bar: Round · Settings · Share · primary */
-  #actions { margin: var(--sp-2) 0 0; justify-content: space-between; }
-  #custom-panel { margin: var(--sp-2) 0 0; color: var(--dim); font-size: 13px; gap: var(--sp-3); }
-
-  #commit, #hit { background: var(--accent2); color: var(--bg); border-color: var(--accent2); font-weight: 700; }
-  #hit {
-    position: fixed; right: 16px; bottom: 18px; z-index: 20;
-    font-size: 18px; padding: 14px 26px; border: none;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45); border-radius: 14px;
-  }
-
-  /* hole/round overlay */
-  #overlay { padding: 20px; gap: 10px; }
-  #overlay .big { font-size: 30px; font-weight: 700; color: var(--accent); }
-  #overlay .sub { color: var(--ink); margin: 0; }
-  #coach { white-space: pre-line; font-size: 13px; color: var(--dim); max-width: 460px; text-align: left; }
-
-  /* first-run onboarding */
-  #onboard {
-    position: fixed; inset: 0; z-index: 50; display: flex;
-    align-items: center; justify-content: center;
-    background: rgba(10, 20, 14, 0.85); padding: 20px;
-  }
-  .ob-card { max-width: 420px; width: 100%; padding: 18px 22px 20px; margin: 0; }
-  .ob-card h2 { margin: 8px 0 4px; font-size: 18px; }
-  .ob-card p { margin: 0 0 16px; color: var(--dim); }
-  .ob-card .bar { justify-content: space-between; }
-
-  /* portrait: caddie line above the map, primary actions in the thumb zone */
-  @media (orientation: portrait) {
-    .app-header { order: 0; }
-    #status { order: 1; }
-    #caddie-line { order: 2; margin: 0 0 var(--sp-2); }
-    #wrap { order: 3; }
-    #actions { order: 4; }
-    #custom-panel { order: 5; }
-    .app-footer { order: 6; }
-    body { padding-bottom: 92px; }
-    #commit {
-      position: fixed; left: 16px; bottom: 18px; z-index: 20;
-      font-size: 16px; padding: 12px 20px; border: none;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45); border-radius: 14px;
-    }
-  }
-</style>
+<link rel="stylesheet" href="styles/cockpit.css">
 </head>
 <body>
-<header class="app-header">
-  <a class="wordmark" href="index.html">Caddie 🎯</a>
-  <nav>
-    <a href="index.html" aria-current="page">Play</a>
-    <a href="stats.html">Career</a>
-    <span class="nav-group"><span class="nav-label">Workshop</span>
-      <a href="arcade.html">Arcade</a>
-      <a href="editor.html">Editor</a>
-      <a href="cms.html">CMS</a>
-      <a href="audit.html">Audit</a>
-      <a href="ab.html">Blind test</a>
-    </span>
-  </nav>
-</header>
 
-<div id="status" class="panel">
-  <div class="status-id">
-    <div id="meta">Reading the hole…</div>
-    <div id="score">Shot – · 0 pts</div>
-  </div>
-  <div class="status-pin">
-    <span id="topin">–</span>
-    <span class="pin-lbl">yds to pin</span>
-  </div>
-</div>
-
+<!-- Layer 0: the course, full-bleed. Everything else floats over it. -->
 <div id="wrap">
   <canvas id="course" width="960" height="576"></canvas>
-  <div id="overlay" class="overlay">
+</div>
+
+<!-- hole/round result — body-level so it commands the whole cockpit -->
+<div id="overlay" class="overlay">
+  <div class="ov-card glass">
     <div class="big"></div>
     <div class="sub"></div>
     <div id="coach" hidden></div>
@@ -120,30 +26,66 @@
   </div>
 </div>
 
-<div id="caddie-line" class="panel"><span id="verdict">Reading the hole…</span> <span id="pattern"></span></div>
+<!-- Layer 1: risk-reactive ambience — the screen itself feels the danger -->
+<div id="vignette" aria-hidden="true"></div>
 
-<div id="actions" class="panel bar">
-  <span class="group"><span class="label">Round</span>
-    <select id="mode" title="Pick a round to play">
-      <option value="daily" selected>Daily</option>
-      <option value="quick">Quick 5</option>
-      <option value="major">Weekly Major</option>
-      <option value="champ">Championship 18</option>
-    </select>
-  </span>
-  <span class="group"><span class="label">Settings</span>
-    <label>HCP <select id="handicap"></select></label>
-    <button id="pro" title="Hide odds and dots — pure judgment">Pro</button>
-    <button id="mygame" aria-expanded="false" aria-controls="custom-panel">My game</button>
-  </span>
-  <button id="share" title="Copy your round result">Share</button>
-  <span class="group">
-    <button id="commit" hidden>Play on ➜</button>
-    <button id="hit" hidden>Hit it ➜</button>
-  </span>
+<!-- Layer 2: the stamped verdict, slammed down near the ball on reveal -->
+<div id="stamp" hidden aria-hidden="true">
+  <div id="stamp-word"></div>
+  <div id="stamp-chip" class="glass"></div>
 </div>
 
-<div id="custom-panel" class="panel bar" hidden>
+<!-- HUD top-left: the one number that matters -->
+<div id="hud-yardage" class="hud" aria-live="off">
+  <span class="eyebrow">Yds to pin</span>
+  <span id="topin">–</span>
+  <div id="score" class="glass">Shot – · 0 pts</div>
+</div>
+
+<!-- HUD top-right: hole identity ticker + compact settings -->
+<div id="hud-ticker" class="hud">
+  <div id="meta" class="glass">Reading the hole…</div>
+  <div id="hud-settings" class="glass">
+    <button id="share" title="Copy your round result">Share</button>
+    <button id="pro" title="Hide odds and dots — pure judgment">Pro</button>
+    <label class="hcp">HCP <select id="handicap"></select></label>
+    <details id="nav-more">
+      <summary title="Career and workshop">☰</summary>
+      <nav class="menu glass">
+        <a href="stats.html">Career</a>
+        <span class="menu-label">Workshop</span>
+        <a href="arcade.html">Arcade</a>
+        <a href="editor.html">Editor</a>
+        <a href="cms.html">CMS</a>
+        <a href="audit.html">Audit</a>
+        <a href="ab.html">Blind test</a>
+      </nav>
+    </details>
+  </div>
+</div>
+
+<!-- HUD bottom-center: the caddie's voice -->
+<div id="caddie-line" class="hud glass"><span id="verdict">Reading the hole…</span> <span id="pattern"></span></div>
+
+<!-- HUD bottom-left: play dock -->
+<div id="dock-play" class="hud glass">
+  <span class="label">Round</span>
+  <select id="mode" title="Pick a round to play">
+    <option value="daily" selected>Daily</option>
+    <option value="quick">Quick 5</option>
+    <option value="major">Weekly Major</option>
+    <option value="champ">Championship 18</option>
+  </select>
+  <button id="mygame" aria-expanded="false" aria-controls="custom-panel">My game</button>
+</div>
+
+<!-- HUD bottom-right: the primary action -->
+<div id="dock-primary" class="hud">
+  <button id="commit" hidden>Play on ➜</button>
+  <button id="hit" hidden>Hit it ➜</button>
+</div>
+
+<div id="custom-panel" class="hud glass" hidden>
   <label>Pattern width <input id="c-width" type="range" min="0.6" max="2" step="0.05" value="1.2"></label>
   <label>Long-club blowup <input id="c-long" type="range" min="0" max="1" step="0.05" value="0.3"></label>
   <label>Miss bias L/R <input id="c-bias" type="range" min="-1.5" max="1.5" step="0.1" value="0"></label>
@@ -151,7 +93,7 @@
 </div>
 
 <div id="onboard" hidden>
-  <div class="ob-card panel">
+  <div class="ob-card glass">
     <div id="ob-step" class="label">Step 1 of 3</div>
     <h2 id="ob-title"></h2>
     <p id="ob-body"></p>
@@ -159,7 +101,6 @@
   </div>
 </div>
 
-<footer class="app-footer">Caddie — a GolfCMS product</footer>
 <script type="module" src="src/ui/caddie.js"></script>
 </body>
 </html>

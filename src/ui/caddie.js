@@ -14,7 +14,7 @@ import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
-import { renderCourseArt, drawFlag, drawBall, drawCallout, TILE } from './paint.js';
+import { renderCourseArt, drawFlag, drawBall, TILE } from './paint.js';
 import { copy } from './copy.js';
 
 const HOLES_PER_ROUND = 5;
@@ -22,6 +22,8 @@ const canvas = document.getElementById('course');
 const ctx = canvas.getContext('2d');
 const meta = document.getElementById('meta');
 const scoreEl = document.getElementById('score');
+const vignetteEl = document.getElementById('vignette');
+const stampEl = document.getElementById('stamp');
 const verdict = document.getElementById('verdict');
 const overlay = document.getElementById('overlay');
 const topinEl = document.getElementById('topin');
@@ -78,6 +80,133 @@ function beginWorld() {
   }
 }
 
+/** Cover-fit the canvas to the viewport: the course fills the screen in both
+ *  orientations, centered, cropping the edges rather than letterboxing. The
+ *  CSS box stays a uniform scale of the canvas bitmap, so pointer math in
+ *  eventCoursePoint keeps working unchanged. */
+function fitCanvas() {
+  const vw = window.innerWidth || 1;
+  const vh = window.innerHeight || 1;
+  const s = Math.max(vw / canvas.width, vh / canvas.height);
+  const w = canvas.width * s;
+  const h = canvas.height * s;
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+  canvas.style.left = `${(vw - w) / 2}px`;
+  canvas.style.top = `${(vh - h) / 2}px`;
+}
+
+/** Canvas-pixel point → viewport CSS coordinates (for DOM layers pinned to
+ *  spots on the map, like the verdict stamp). */
+function canvasToViewport(px) {
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: r.left + (px.x / canvas.width) * r.width,
+    y: r.top + (px.y / canvas.height) * r.height,
+  };
+}
+
+// --- risk-reactive ambience: the vignette layer tints toward alarm as the
+// aimed pattern flirts with water/OB, sand, and trees ---
+function setDanger(pct) {
+  const wet = pct.wet ?? 0;
+  const trouble = wet + (pct.sand ?? 0) + (pct.trees ?? 0);
+  const d = Math.min(1, (wet * 2 + trouble) / 90);
+  vignetteEl.style.setProperty('--danger', d.toFixed(3));
+  vignetteEl.classList.toggle('alarm', wet > 0);
+}
+function clearDanger() {
+  vignetteEl.style.setProperty('--danger', '0');
+  vignetteEl.classList.remove('alarm');
+}
+
+// --- shot FX: ball-flight comet, then a radial heatmap sweep from the lie ---
+const SWEEP_MS = 600;
+let fx = null; // {stage:'flight'|'sweep', t0, p, from, to, dur}
+let fxRaf = 0;
+
+function startShotFx(from, to) {
+  cancelFx();
+  const d = Math.hypot(to.x - from.x, to.y - from.y);
+  fx = {
+    stage: 'flight', t0: performance.now(), p: 0,
+    from: { ...from }, to: { ...to },
+    dur: Math.min(1000, 340 + d * 14),
+  };
+  fxRaf = requestAnimationFrame(fxTick);
+}
+
+function fxTick() {
+  if (!fx) return;
+  const el = performance.now() - fx.t0;
+  if (fx.stage === 'flight') {
+    fx.p = Math.min(1, el / fx.dur);
+    if (fx.p >= 1) {
+      fx.stage = 'sweep';
+      fx.t0 = performance.now();
+      fx.p = 0;
+      showStamp();
+    }
+  } else {
+    fx.p = Math.min(1, el / SWEEP_MS);
+    if (fx.p >= 1) fx = null;
+  }
+  refresh();
+  if (fx) fxRaf = requestAnimationFrame(fxTick);
+}
+
+function cancelFx() {
+  if (fxRaf) cancelAnimationFrame(fxRaf);
+  fxRaf = 0;
+  fx = null;
+}
+
+/** The comet: interpolated ball with a fading trail, arcing lie → landing. */
+function drawFlight() {
+  const ease = (t) => t * t * (3 - 2 * t);
+  const at = (t) => ({
+    x: fx.from.x + (fx.to.x - fx.from.x) * t,
+    y: fx.from.y + (fx.to.y - fx.from.y) * t,
+  });
+  const distPx = Math.hypot(fx.to.x - fx.from.x, fx.to.y - fx.from.y) * TILE;
+  const lift = Math.min(90, 18 + distPx * 0.16);
+  const SAMPLES = 14;
+  for (let k = SAMPLES; k >= 0; k--) {
+    const e = ease(Math.max(0, fx.p - k * 0.04));
+    const sp = toScreen(at(e));
+    const y = sp.y - Math.sin(Math.PI * e) * lift;
+    if (k === 0) {
+      drawBall(ctx, { x: sp.x, y });
+      continue;
+    }
+    const a = 0.5 * (1 - k / SAMPLES) * Math.min(1, fx.p * 3);
+    if (a <= 0.02) continue;
+    ctx.fillStyle = `rgba(255, 240, 190, ${a.toFixed(3)})`;
+    ctx.beginPath();
+    ctx.arc(sp.x, y, 1.5 + 5 * (1 - k / SAMPLES), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// --- the stamped verdict: huge rotated call near the ball, SG chip below ---
+function showStamp() {
+  if (!reveal?.note) return;
+  stampEl.className = reveal.note.tone;
+  document.getElementById('stamp-word').textContent = reveal.note.title.toUpperCase();
+  document.getElementById('stamp-chip').textContent = reveal.note.lines.slice(0, 2).join('  ·  ');
+  stampEl.hidden = false;
+  positionStamp();
+}
+function positionStamp() {
+  if (stampEl.hidden || !reveal) return;
+  const p = canvasToViewport(toScreen(reveal.landing ?? reveal.your));
+  const x = Math.max(160, Math.min(window.innerWidth - 160, p.x));
+  const y = Math.max(120, Math.min(window.innerHeight - 140, p.y - 44));
+  stampEl.style.left = `${x}px`;
+  stampEl.style.top = `${y}px`;
+}
+function hideStamp() { stampEl.hidden = true; }
+
 function startRound(seed, daily, opts = {}) {
   round = {
     seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0,
@@ -105,6 +234,9 @@ function holeSeed(i) {
 
 function loadHole() {
   phase = 'loading';
+  cancelFx();
+  hideStamp();
+  clearDanger();
   overlay.classList.remove('show');
   meta.textContent = copy.loadingHole(round.holeIndex + 1, round.count);
   setTimeout(() => {
@@ -147,17 +279,20 @@ function refresh() {
   topinEl.textContent = String(yards(toPin(ball)));
   document.getElementById('commit').hidden = phase !== 'reveal';
   document.getElementById('hit').hidden = !(touchMode && phase === 'aim' && aimTarget);
+  if (phase === 'reveal' && !stampEl.hidden) positionStamp();
 }
 
 function drawBase() {
   rotated = window.innerHeight > window.innerWidth;
   canvas.width = (rotated ? course.height : course.width) * TILE;
   canvas.height = (rotated ? course.width : course.height) * TILE;
+  fitCanvas();
   beginWorld();
   ctx.drawImage(art, 0, 0);
   ctx.restore();
   drawFlag(ctx, toScreen(course.hole));
-  drawBall(ctx, toScreen(ball));
+  // during the flight comet the interpolated ball is the only ball on screen
+  if (!(fx && fx.stage === 'flight')) drawBall(ctx, toScreen(ball));
 }
 
 function ellipsePath(from, target, sigmaScale, k) {
@@ -217,10 +352,20 @@ function drawAim() {
 }
 
 function drawReveal() {
+  // stage 1: the ball flies (comet trail); everything else waits
+  if (fx && fx.stage === 'flight') {
+    drawFlight();
+    return;
+  }
+  // stage 2: heatmap sweeps radially outward from the lie it was hit from
+  const sweep = fx && fx.stage === 'sweep' ? fx.p : 1;
+  const origin = reveal.from ?? ball;
+  const limit = sweep * (reveal.maxHeat ?? Infinity);
   // heatmap: green = smart aim, red = stroke-burning aim
   beginWorld();
   const min = Math.min(...reveal.heat.map((c) => c.e));
   for (const c of reveal.heat) {
+    if (sweep < 1 && Math.hypot(c.x - origin.x, c.y - origin.y) > limit) continue;
     const badness = Math.min(1, (c.e - min) / 1.2);
     ctx.fillStyle = `rgba(${Math.round(80 + 175 * badness)}, ${Math.round(200 - 140 * badness)}, 80, 0.30)`;
     ctx.fillRect(c.x * TILE, c.y * TILE, TILE, TILE);
@@ -242,8 +387,8 @@ function drawReveal() {
   ctx.lineWidth = 1;
   // where the sampled ball actually went
   if (reveal.landing) drawBall(ctx, toScreen(reveal.landing));
-  // the post-shot note, inline on the map
-  if (reveal.note) drawCallout(ctx, toScreen(reveal.landing ?? reveal.your), reveal.note);
+  // the post-shot note now lands as the DOM stamp + glass chip (showStamp),
+  // not the painted callout card
 }
 
 function windLabel() {
@@ -284,6 +429,8 @@ function updateAimReadout(lie) {
         w: yards(4 * s.lat), l: yards(4 * s.long), pct: stats.pct,
         medianLeave: stats.medianLeave !== null ? yards(stats.medianLeave) : null,
       });
+  // the screen itself feels the danger: tint the vignette toward alarm
+  setDanger(stats.pct);
   // haptic tick when water/OB comes into or out of play while dragging
   const wetNow = stats.pct.wet > 0;
   if (touchMode && wetNow !== hadWater) navigator.vibrate?.(12);
@@ -409,8 +556,14 @@ function commitDecision() {
     outcome = rest.kind === 'water' ? 'penalty-water' : 'penalty-ob';
   }
   decisions.push(score);
-  reveal = { your: { ...aimTarget }, score, heat, landing: rest.kind === 'rest' ? { x: rest.x, y: rest.y } : null };
+  reveal = {
+    your: { ...aimTarget }, score, heat,
+    landing: rest.kind === 'rest' ? { x: rest.x, y: rest.y } : null,
+    from: { ...from },
+    maxHeat: Math.max(1, ...heat.map((c) => Math.hypot(c.x - from.x, c.y - from.y))),
+  };
   phase = 'reveal';
+  clearDanger();
   const sg = score.sgLost;
   const outcomeText = copy.outcome[outcome];
   const ballNow = rest.kind === 'rest' ? copy.ballOut(yards(toPin(ball))) : outcomeText;
@@ -459,10 +612,15 @@ function commitDecision() {
       last: outcome !== 'landed' ? outcomeText : copy.ballOut(yards(toPin(ball))),
     }),
   };
+  // flight comet toward where the strike actually came down, then the sweep
+  startShotFx(from, { x: land.x, y: land.y });
   refresh();
 }
 
 function advance() {
+  cancelFx();
+  hideStamp();
+  clearDanger();
   if (isHoleOver(course, ball) || decisions.length >= 8) return finishHole();
   phase = 'aim';
   aimTarget = null;
