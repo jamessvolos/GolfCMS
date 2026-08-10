@@ -7,13 +7,13 @@ import { substream } from './rng.js';
 import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE, slopeDir } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
 
-export const MAX_CARRY = 14; // tiles — the longest club in the bag
+export const MAX_CARRY = 15; // tiles (240 yds) — a scratch driver carry
 
 // Per-lie shot constraints: how far you can hit and how much wider the
 // pattern gets. Trees are a punch-out, sand is an escape.
 export function lieParams(terrain) {
   if (terrain === SAND) return { maxDist: 7, sigmaScale: 1.8 };
-  if (terrain === ROUGH) return { maxDist: 11, sigmaScale: 1.4 };
+  if (terrain === ROUGH) return { maxDist: 12, sigmaScale: 1.4 };
   if (terrain === TREES) return { maxDist: 5, sigmaScale: 1.6 };
   return { maxDist: MAX_CARRY, sigmaScale: 1 }; // fairway, green, ice, slopes
 }
@@ -22,13 +22,19 @@ export function lieParams(terrain) {
 // further as carry approaches max — long clubs punish higher handicaps
 // disproportionately, exactly as in real dispersion data. 'scratch' is the
 // identity profile, so everything downstream defaults to today's behavior.
+// `dist` scales reach too: a 20-capper doesn't carry a scratch driver.
 export const HANDICAPS = [
-  { id: 'tour', label: 'Tour pro', base: 0.75, longExtra: 0 },
-  { id: 'scratch', label: 'Scratch', base: 1, longExtra: 0 },
-  { id: 'ten', label: '10 handicap', base: 1.3, longExtra: 0.3 },
-  { id: 'twenty', label: '20 handicap', base: 1.6, longExtra: 0.6 },
+  { id: 'tour', label: 'Tour pro', base: 0.78, longExtra: 0, dist: 1.08 },
+  { id: 'scratch', label: 'Scratch', base: 1, longExtra: 0, dist: 1 },
+  { id: 'ten', label: '10 handicap', base: 1.35, longExtra: 0.35, dist: 0.92 },
+  { id: 'twenty', label: '20 handicap', base: 1.7, longExtra: 0.7, dist: 0.84 },
 ];
 export const DEFAULT_PROFILE = HANDICAPS[1];
+
+/** Effective reach from a lie for a given player: lie limit x distance factor. */
+export function reach(lie, profile = DEFAULT_PROFILE) {
+  return Math.max(2, Math.round(lie.maxDist * (profile.dist ?? 1)));
+}
 
 export function handicapById(id) {
   return HANDICAPS.find((h) => h.id === id) ?? DEFAULT_PROFILE;
@@ -37,9 +43,12 @@ export function handicapById(id) {
 /** Ellipse semi-axes (in tiles) for a shot of the given carry distance. */
 export function sigmas(dist, sigmaScale, profile = DEFAULT_PROFILE) {
   const skill = profile.base + profile.longExtra * (dist / MAX_CARRY);
+  // Real dispersion is WIDE, not deep: lateral misses dominate, and distance
+  // control is comparatively tight for a known club. Scratch full driver:
+  // lateral 1-sigma ~21 yds, depth 1-sigma ~14 yds.
   return {
-    long: (0.5 + dist * 0.09) * sigmaScale * skill,  // depth error grows with club
-    lat: (0.4 + dist * 0.06) * sigmaScale * skill,   // lateral error slightly tighter
+    long: (0.2 + dist * 0.042) * sigmaScale * skill, // depth (distance control)
+    lat: (0.22 + dist * 0.075) * sigmaScale * skill, // lateral (the real miss)
   };
 }
 

@@ -26,7 +26,7 @@ test('dispersion is deterministic and widens with bad lies', () => {
   assert.equal(pts.length, 16);
   const spreadX = Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x));
   const spreadY = Math.max(...pts.map((p) => p.y)) - Math.min(...pts.map((p) => p.y));
-  assert.ok(spreadX > spreadY, 'depth error exceeds lateral error along the line of play');
+  assert.ok(spreadY > spreadX, 'lateral error exceeds depth error — patterns are wide, not deep');
 });
 
 test('expected putts grow with distance and stay in [1, 3]', () => {

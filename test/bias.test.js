@@ -19,14 +19,23 @@ test('directional miss bias shifts the pattern mean sideways, scaled by carry', 
   assert.ok(Math.abs(mean(chip, 'y') - 12) < 0.4, 'short clubs barely feel the bias');
 });
 
-test('the caddie aims into the miss to compensate', () => {
+test('the caddie plays farther from trouble when the miss leaks toward it', () => {
   const c = makeCourse(11, 'straight', 1);
   c.cells.fill(FAIRWAY);
   c.tee = { x: 3, y: 12 };
   c.hole = { x: 34, y: 12 };
   setCell(c, 34, 12, GREEN);
-  const biased = { id: 'x', label: 'x', base: 1, longExtra: 0, bias: 1.5 };
-  const V = strokesField(c, 6, biased);
-  const best = bestAim(c, V, { x: 20, y: 12 }, 1, biased);
-  assert.ok(best.target.y < 12, `caddie holds against the rightward miss, got y=${best.target.y}`);
+  // water guards the entire right side of the landing zone
+  for (let x = 14; x <= 30; x++) for (let y = 15; y <= 18; y++) {
+    const { setCell: sc } = { setCell };
+    sc(c, x, y, 3); // WATER
+  }
+  const straight = { id: 's', label: 's', base: 1, longExtra: 0, bias: 0 };
+  const leaky = { id: 'x', label: 'x', base: 1, longExtra: 0, bias: 1.5 };
+  const from = { x: 6, y: 12 };
+  const a = bestAim(c, strokesField(c, 6, straight), from, 1, straight);
+  const b = bestAim(c, strokesField(c, 6, leaky), from, 1, leaky);
+  assert.ok(b.target.y <= a.target.y, `rightward leak aims farther left of the water: ` +
+    `${b.target.y} <= ${a.target.y}`);
+  assert.ok(b.target.y < 12, `and holds left of the direct line, got y=${b.target.y}`);
 });

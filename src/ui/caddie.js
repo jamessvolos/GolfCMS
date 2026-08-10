@@ -7,7 +7,7 @@ import { substream } from '../engine/rng.js';
 import { generateCourse } from '../engine/generate.js';
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, HANDICAPS, handicapById } from '../engine/dispersion.js';
+import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
@@ -46,7 +46,7 @@ function resolveProfile(id) {
     try {
       const c = JSON.parse(localStorage.getItem('golfcms.customProfile'));
       if (c && typeof c.base === 'number') {
-        return { id: 'custom', label: 'Custom', base: c.base, longExtra: c.longExtra ?? 0, bias: c.bias ?? 0 };
+        return { id: 'custom', label: 'Custom', base: c.base, longExtra: c.longExtra ?? 0, bias: c.bias ?? 0, dist: c.dist ?? 1 };
       }
     } catch { /* fall through */ }
   }
@@ -342,7 +342,7 @@ function drawAim() {
   // reach ring
   ctx.strokeStyle = 'rgba(255,255,255,0.18)';
   ctx.beginPath();
-  ctx.arc((ball.x + 0.5) * TILE, (ball.y + 0.5) * TILE, lie.maxDist * TILE, 0, Math.PI * 2);
+  ctx.arc((ball.x + 0.5) * TILE, (ball.y + 0.5) * TILE, reach(lie, profile) * TILE, 0, Math.PI * 2);
   ctx.stroke();
   // 1σ and 2σ pattern ellipses
   ctx.fillStyle = 'rgba(255, 209, 102, 0.20)';
@@ -429,7 +429,7 @@ function setAim(pt) {
   const d = Math.hypot(pt.x - ball.x, pt.y - ball.y);
   // clamp inside the ring by half a tile so rounding can't push the target
   // past maxDist (which the evaluator would price as unreachable)
-  const clamp = Math.min(1, (lie.maxDist - 0.51) / Math.max(d, 0.001));
+  const clamp = Math.min(1, (reach(lie, profile) - 0.51) / Math.max(d, 0.001));
   aimTarget = {
     x: Math.round(ball.x + (pt.x - ball.x) * clamp),
     y: Math.round(ball.y + (pt.y - ball.y) * clamp),
@@ -473,7 +473,7 @@ function eventCoursePoint(e) {
 function initNeutralAim() {
   const lie = lieParams(cellAt(course, ball.x, ball.y));
   const d = toPin(ball);
-  const f = Math.min(lie.maxDist * 0.7, Math.max(1, d)) / Math.max(d, 0.001);
+  const f = Math.min(reach(lie, profile) * 0.7, Math.max(1, d)) / Math.max(d, 0.001);
   setAim({ x: ball.x + (course.hole.x - ball.x) * f, y: ball.y + (course.hole.y - ball.y) * f });
 }
 
@@ -532,6 +532,7 @@ document.getElementById('custom-apply').addEventListener('click', () => {
     base: Number(document.getElementById('c-width').value),
     longExtra: Number(document.getElementById('c-long').value),
     bias: Number(document.getElementById('c-bias').value),
+    dist: Number(document.getElementById('c-dist')?.value ?? 1),
   };
   localStorage.setItem('golfcms.customProfile', JSON.stringify(custom));
   localStorage.setItem('golfcms.handicap', 'custom');
