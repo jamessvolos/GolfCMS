@@ -15,6 +15,7 @@ import { courseName } from '../engine/namer.js';
 import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
 import { renderCourseArt, drawFlag, drawBall, drawCallout, TILE } from './paint.js';
+import { copy } from './copy.js';
 
 const HOLES_PER_ROUND = 5;
 const canvas = document.getElementById('course');
@@ -23,6 +24,8 @@ const meta = document.getElementById('meta');
 const scoreEl = document.getElementById('score');
 const verdict = document.getElementById('verdict');
 const overlay = document.getElementById('overlay');
+const topinEl = document.getElementById('topin');
+const modeSel = document.getElementById('mode');
 
 let round = null; // {seed, daily, holeIndex, holes: [{points, strokes}], totalPoints}
 let course = null;
@@ -81,7 +84,16 @@ function startRound(seed, daily, opts = {}) {
     count: opts.count ?? HOLES_PER_ROUND, label: opts.label ?? null, hash: opts.hash ?? null,
   };
   location.hash = round.hash ?? (daily ? '#/daily' : `#/round/${round.seed}`);
+  syncModeSelect();
   loadHole();
+}
+
+/** Keep the Round menu honest about what is being played. */
+function syncModeSelect() {
+  modeSel.value = round.daily ? 'daily'
+    : round.count === 18 ? 'champ'
+    : round.hash === '#/major' ? 'major'
+    : 'quick';
 }
 
 function holeSeed(i) {
@@ -94,7 +106,7 @@ function holeSeed(i) {
 function loadHole() {
   phase = 'loading';
   overlay.classList.remove('show');
-  meta.textContent = `Hole ${round.holeIndex + 1}/${round.count} · the caddie is reading the hole…`;
+  meta.textContent = copy.loadingHole(round.holeIndex + 1, round.count);
   setTimeout(() => {
     const seed = holeSeed(round.holeIndex);
     // draw this hole's length from the par-3/4/5 menu, seeded per hole
@@ -112,12 +124,14 @@ function loadHole() {
     aimTarget = null;
     reveal = null;
     phase = 'aim';
-    const label = round.label ?? (round.daily ? `Daily #${dailyNumber()}` : `Round ${round.seed}`);
-    meta.textContent =
-      `${courseName(round.seed)} · ${label} · hole ${round.holeIndex + 1}/${round.count} · par ${holeInfo.par} · ` +
-      `${holeInfo.yds} yds · ${course.archetype}` + windLabel();
-    verdict.textContent =
-      `${yards(toPin(ball))} yds to the pin. Place your target — the ellipse is where this shot actually lands.`;
+    const label = round.label ?? (round.daily ? copy.dailyLabel(dailyNumber()) : copy.roundLabel(round.seed));
+    meta.textContent = copy.holeMeta({
+      course: courseName(round.seed), label,
+      n: round.holeIndex + 1, count: round.count,
+      par: holeInfo.par, yds: holeInfo.yds,
+      arch: course.archetype, wind: windLabel(),
+    });
+    verdict.textContent = copy.firstAim(yards(toPin(ball)));
     document.getElementById('pattern').textContent = '';
     if (touchMode) initNeutralAim();
     refresh();
@@ -129,9 +143,8 @@ function refresh() {
   if (phase === 'aim' && aimTarget) drawAim();
   if (phase === 'reveal' && reveal) drawReveal();
   const pts = decisions.reduce((s, d) => s + d.points, 0);
-  scoreEl.textContent =
-    `Hole ${round.holeIndex + 1}/${round.count} (par ${holeInfo.par}, ${holeInfo.yds} yds) · ` +
-    `Shot ${strokes + 1} · ${yards(toPin(ball))} yds out · ${round.totalPoints + pts} pts`;
+  scoreEl.textContent = copy.scoreLine(strokes + 1, round.totalPoints + pts);
+  topinEl.textContent = String(yards(toPin(ball)));
   document.getElementById('commit').hidden = phase !== 'reveal';
   document.getElementById('hit').hidden = !(touchMode && phase === 'aim' && aimTarget);
 }
@@ -239,7 +252,7 @@ function windLabel() {
   const mag = Math.max(Math.abs(w.x), Math.abs(w.y));
   const dir = ['→', '↘', '↓', '↙', '←', '↖', '↑', '↗'][
     ((Math.round(Math.atan2(w.y, w.x) / (Math.PI / 4)) % 8) + 8) % 8];
-  return ` · wind ${mag} ${dir}`;
+  return copy.wind(mag, dir);
 }
 
 function setAim(pt) {
@@ -259,22 +272,18 @@ function setAim(pt) {
 function updateAimReadout(lie) {
   const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
   const leaves = toPin(aimTarget);
-  verdict.textContent =
-    `Pin ${yards(toPin(ball))} yds · this target: ${yards(carry)}-yd carry (${clubName(carry)})` +
-    (leaves > 1.5 ? ` · leaves ${yards(leaves)} yds in` : ' · going at the flag');
+  verdict.textContent = copy.aimReadout({
+    carry: yards(carry), club: clubName(carry),
+    leaves: yards(leaves), atFlag: !(leaves > 1.5),
+  });
   const s = sigmas(carry, lie.sigmaScale, profile);
   const stats = patternStats(course, ball, aimTarget, lie.sigmaScale, profile);
-  const parts = [];
-  if (stats.pct.green) parts.push(`<span class="fw">${stats.pct.green}% green</span>`);
-  if (stats.pct.fairway) parts.push(`<span class="fw">${stats.pct.fairway}% fairway</span>`);
-  if (stats.pct.rough) parts.push(`${stats.pct.rough}% rough`);
-  if (stats.pct.sand) parts.push(`${stats.pct.sand}% sand`);
-  if (stats.pct.trees) parts.push(`${stats.pct.trees}% trees`);
-  if (stats.pct.wet) parts.push(`<span class="wet">${stats.pct.wet}% water/OB</span>`);
   document.getElementById('pattern').innerHTML = proMode
-    ? '🧠 Pro mode — no odds, no dots. Trust your eye; the reveal keeps score.'
-    : `Pattern ${yards(4 * s.lat)} × ${yards(4 * s.long)} yds · ${parts.join(' · ')}` +
-      (stats.medianLeave !== null ? ` · median leave ${yards(stats.medianLeave)} yds` : '');
+    ? copy.proPattern
+    : copy.patternLine({
+        w: yards(4 * s.lat), l: yards(4 * s.long), pct: stats.pct,
+        medianLeave: stats.medianLeave !== null ? yards(stats.medianLeave) : null,
+      });
   // haptic tick when water/OB comes into or out of play while dragging
   const wetNow = stats.pct.wet > 0;
   if (touchMode && wetNow !== hadWater) navigator.vibrate?.(12);
@@ -358,10 +367,10 @@ document.getElementById('custom-apply').addEventListener('click', () => {
   profile = resolveProfile('custom');
   document.getElementById('custom-panel').hidden = true;
   if (course && phase !== 'loading') {
-    verdict.textContent = 'Recalibrating the caddie for your personal pattern…';
+    verdict.textContent = copy.recalibratingCustom;
     setTimeout(() => {
       V = strokesField(course, 6, profile);
-      verdict.textContent = `Caddie recalibrated for your pattern. ${yards(toPin(ball))} yds to the pin.`;
+      verdict.textContent = copy.recalibratedCustom(yards(toPin(ball)));
       refresh();
     }, 30);
   }
@@ -397,21 +406,23 @@ function commitDecision() {
     outcome = rest.terrain === WATER ? 'splash' : 'landed';
   } else {
     strokes += 1; // penalty; replay from the same spot
-    outcome = rest.kind === 'water' ? 'splash — penalty, replay' : 'OB — penalty, replay';
+    outcome = rest.kind === 'water' ? 'penalty-water' : 'penalty-ob';
   }
   decisions.push(score);
   reveal = { your: { ...aimTarget }, score, heat, landing: rest.kind === 'rest' ? { x: rest.x, y: rest.y } : null };
   phase = 'reveal';
   const sg = score.sgLost;
-  const call = sg < 0.02 ? 'Caddie-approved. Perfect target.'
-    : sg < 0.08 ? 'Good call — within a whisker of optimal.'
-    : sg < 0.2 ? 'Playable, but the caddie sees a better line.'
-    : 'That aim burns real strokes.';
-  const ballNow = rest.kind === 'rest' ? `ball ${yards(toPin(ball))} yds out` : outcome;
-  verdict.textContent =
-    `${call} You: E[${score.yourE.toFixed(2)}] strokes · optimal (green ring, ` +
-    `${yards(Math.hypot(score.optimal.x - from.x, score.optimal.y - from.y))}-yd carry): ` +
-    `E[${score.optimalE.toFixed(2)}] · SG lost ${sg.toFixed(2)} · +${score.points} pts · ${ballNow}`;
+  const outcomeText = copy.outcome[outcome];
+  const ballNow = rest.kind === 'rest' ? copy.ballOut(yards(toPin(ball))) : outcomeText;
+  verdict.textContent = copy.verdictLine({
+    call: copy.verdictCall(sg),
+    optCarry: yards(Math.hypot(score.optimal.x - from.x, score.optimal.y - from.y)),
+    yourE: score.yourE.toFixed(2),
+    optimalE: score.optimalE.toFixed(2),
+    sg: sg.toFixed(2),
+    points: score.points,
+    ballNow,
+  });
   // risk ledger: your line vs the caddie's, in trouble percentages
   const trouble = (t) => {
     const p = patternStats(course, from, t, lie.sigmaScale, profile).pct;
@@ -420,9 +431,7 @@ function commitDecision() {
   const yourRisk = trouble(reveal.your);
   const caddieRisk = trouble(score.optimal);
   Object.assign(score, { yourRisk, caddieRisk });
-  document.getElementById('pattern').innerHTML =
-    `Risk taken — your line: <span class="wet">${yourRisk}%</span> trouble ` +
-    `(water/sand/trees) · caddie's line: <span class="fw">${caddieRisk}%</span>`;
+  document.getElementById('pattern').innerHTML = copy.riskLedger(yourRisk, caddieRisk);
   // career log: every decision, forever (well, the last 2000)
   try {
     const KEY = 'golfcms.caddie.log.v1';
@@ -439,14 +448,16 @@ function commitDecision() {
   } catch { /* storage blocked: career stats are best-effort */ }
   // inline post-shot note, pinned to where the ball finished
   reveal.note = {
-    title: sg < 0.02 ? 'Caddie-approved' : sg < 0.08 ? 'Good call' : sg < 0.2 ? 'Loose' : 'Costly',
+    title: copy.noteTitle(sg),
     tone: sg < 0.08 ? 'good' : sg < 0.2 ? 'ok' : 'bad',
-    lines: [
-      `SG ${sg < 0.005 ? '±0.00' : '−' + sg.toFixed(2)} · +${score.points} pts`,
-      `E ${score.yourE.toFixed(2)} vs caddie ${score.optimalE.toFixed(2)}`,
-      `risk ${yourRisk}% vs caddie ${caddieRisk}%`,
-      outcome !== 'landed' ? outcome : `ball ${yards(toPin(ball))} yds out`,
-    ],
+    lines: copy.noteLines({
+      sg: sg < 0.005 ? '±0.00' : '−' + sg.toFixed(2),
+      points: score.points,
+      yourE: score.yourE.toFixed(2),
+      optimalE: score.optimalE.toFixed(2),
+      yourRisk, caddieRisk,
+      last: outcome !== 'landed' ? outcomeText : copy.ballOut(yards(toPin(ball))),
+    }),
   };
   refresh();
 }
@@ -456,8 +467,7 @@ function advance() {
   phase = 'aim';
   aimTarget = null;
   reveal = null;
-  verdict.textContent =
-    `Shot ${strokes + 1}: ${yards(toPin(ball))} yds to the pin — pick your target from this lie.`;
+  verdict.textContent = copy.nextShot(strokes + 1, yards(toPin(ball)));
   document.getElementById('pattern').textContent = '';
   if (touchMode) initNeutralAim();
   refresh();
@@ -478,24 +488,22 @@ function finishHole() {
   phase = 'holeover';
   const done = round.holeIndex + 1 >= round.count;
   overlay.querySelector('.big').textContent = done
-    ? `${round.label ?? 'Round'}: ${round.totalPoints} / ${round.count * 1000}`
-    : `Hole ${round.holeIndex + 1}: ${holePts} / 1000`;
+    ? copy.roundScore(round.label ?? copy.genericRoundLabel, round.totalPoints, round.count * 1000)
+    : copy.holeScore(round.holeIndex + 1, holePts);
   const est = (strokes + putts).toFixed(1);
   const vsPar = (strokes + putts - holeInfo.par).toFixed(1);
   overlay.querySelector('.sub').textContent = done
-    ? `Decision quality across ${round.count} holes — ` + roundGrade(round.totalPoints)
-    : `${decisions.length} decisions · est. ${est} strokes on the par-${holeInfo.par} ` +
-      `${holeInfo.yds}-yarder (${vsPar >= 0 ? '+' : ''}${vsPar})`;
-  document.getElementById('ov-next').textContent = done ? 'New round' : 'Next hole ⛳';
+    ? copy.roundSub(round.count, copy.roundGrade(round.totalPoints / (round.count * 1000)))
+    : copy.holeSub({
+        decisions: decisions.length, est, par: holeInfo.par, yds: holeInfo.yds,
+        vsPar: `${vsPar >= 0 ? '+' : ''}${vsPar}`,
+      });
+  document.getElementById('ov-next').textContent = done ? copy.newRound : copy.nextHole;
   const coach = document.getElementById('coach');
   if (done) {
     const all = round.holes.flatMap((h) => h.recap ?? []);
     const worst = all.filter((d) => d.sgLost > 0.05).sort((a, b) => b.sgLost - a.sgLost).slice(0, 2);
-    coach.textContent = worst.length === 0
-      ? "Coach's note: nothing to fix — every target was inside a nickel of optimal. 🧢"
-      : "Coach's notes:\n" + worst.map((d) =>
-          `· Hole ${d.hole}, shot ${d.shot}: −${d.sgLost.toFixed(2)} SG — you took ` +
-          `${d.risk}% trouble where the caddie's line held ${d.caddieRisk}%.`).join('\n');
+    coach.textContent = worst.length === 0 ? copy.coachClean : copy.coachNotes(worst);
     coach.hidden = false;
   } else {
     coach.hidden = true;
@@ -503,17 +511,13 @@ function finishHole() {
   overlay.classList.add('show');
 }
 
-function roundGrade(p) {
-  const r = p / (round.count * 1000);
-  return r > 0.97 ? 'tour-caddie brain. 🧠' : r > 0.9 ? 'sharp course management.'
-    : r > 0.8 ? 'solid, with a few loose targets.' : 'the caddie would like a word.';
-}
-
 function shareText() {
   const label = round.label ??
-    (round.daily ? `Caddie Daily #${dailyNumber()}` : `Caddie round ${round.seed}`);
-  const holes = round.holes.map((h) => (h.points > 970 ? '🟩' : h.points > 900 ? '🟨' : '🟥')).join('');
-  return `${label} — ${round.totalPoints}/${round.count * 1000} ${holes}`;
+    (round.daily ? copy.shareDaily(dailyNumber()) : copy.shareRound(round.seed));
+  return copy.share({
+    label, total: round.totalPoints, max: round.count * 1000,
+    squares: copy.shareSquares(round.holes),
+  });
 }
 
 document.getElementById('ov-next').addEventListener('click', () => {
@@ -526,7 +530,6 @@ document.getElementById('ov-next').addEventListener('click', () => {
 });
 document.getElementById('ov-share').addEventListener('click', () => navigator.clipboard?.writeText(shareText()));
 document.getElementById('share').addEventListener('click', () => navigator.clipboard?.writeText(shareText()));
-document.getElementById('new').addEventListener('click', () => startRound((Math.random() * 0xffffffff) >>> 0, false));
 const hcpSel = document.getElementById('handicap');
 for (const h of HANDICAPS) {
   const o = document.createElement('option');
@@ -547,17 +550,14 @@ hcpSel.addEventListener('change', () => {
   profile = resolveProfile(hcpSel.value);
   localStorage.setItem('golfcms.handicap', hcpSel.value);
   if (course && phase !== 'loading') {
-    verdict.textContent = `Recalibrating the caddie for a ${profile.label.toLowerCase()} pattern…`;
+    verdict.textContent = copy.recalibratingHcp(profile.label.toLowerCase());
     setTimeout(() => {
       V = strokesField(course, 6, profile);
-      verdict.textContent =
-        `Caddie recalibrated: optimal targets now assume ${profile.label.toLowerCase()} dispersion. ` +
-        `${yards(toPin(ball))} yds to the pin.`;
+      verdict.textContent = copy.recalibratedHcp(profile.label.toLowerCase(), yards(toPin(ball)));
       refresh();
     }, 30);
   }
 });
-document.getElementById('daily').addEventListener('click', () => startRound(dailySeed(), true));
 
 // test hooks
 window.__caddie = {
@@ -569,14 +569,66 @@ window.__caddie = {
 function startMajor() {
   const wk = weekKey();
   startRound(gauntletSeed('caddie-major-' + wk), false,
-    { count: 5, label: `Major ${wk}`, hash: '#/major' });
+    { count: 5, label: copy.majorLabel(wk), hash: '#/major' });
 }
 
-document.getElementById('major').addEventListener('click', startMajor);
-document.getElementById('champ').addEventListener('click', () => {
-  const seed = (Math.random() * 0xffffffff) >>> 0;
-  startRound(seed, false, { count: 18, label: `Championship ${seed}`, hash: `#/champ/${seed}` });
+function startChampionship(seed = (Math.random() * 0xffffffff) >>> 0) {
+  startRound(seed >>> 0, false,
+    { count: 18, label: copy.champLabel(seed), hash: `#/champ/${seed}` });
+}
+
+// the Round menu: one control, four ways to play
+modeSel.addEventListener('change', () => {
+  const v = modeSel.value;
+  if (v === 'daily') startRound(dailySeed(), true);
+  else if (v === 'major') startMajor();
+  else if (v === 'champ') startChampionship();
+  else startRound((Math.random() * 0xffffffff) >>> 0, false);
 });
+
+// "My game" disclosure: the custom-pattern panel stays out of the way
+const mygameBtn = document.getElementById('mygame');
+mygameBtn.addEventListener('click', () => {
+  const panel = document.getElementById('custom-panel');
+  panel.hidden = !panel.hidden;
+  mygameBtn.setAttribute('aria-expanded', String(!panel.hidden));
+});
+
+// control labels live in copy.js with everything else
+document.getElementById('hit').textContent = copy.hitIt;
+document.getElementById('commit').textContent = copy.playOn;
+document.getElementById('ov-share').textContent = copy.copyResult;
+
+// first-run onboarding: three cards, dismissible, never shown again
+{
+  const ob = document.getElementById('onboard');
+  let seen = '1';
+  try { seen = localStorage.getItem('golfcms.onboarded.v1'); } catch { /* storage blocked: skip it */ }
+  if (ob && !seen) {
+    let step = 0;
+    const render = () => {
+      const s = copy.onboarding[step];
+      document.getElementById('ob-step').textContent = copy.onboardingStep(step + 1, copy.onboarding.length);
+      document.getElementById('ob-title').textContent = s.title;
+      document.getElementById('ob-body').textContent = s.body;
+      document.getElementById('ob-next').textContent =
+        step === copy.onboarding.length - 1 ? copy.onboardingPlay : copy.onboardingNext;
+      document.getElementById('ob-skip').textContent = copy.onboardingSkip;
+    };
+    const dismiss = () => {
+      try { localStorage.setItem('golfcms.onboarded.v1', '1'); } catch { /* best-effort */ }
+      ob.remove();
+    };
+    document.getElementById('ob-next').addEventListener('click', () => {
+      if (step < copy.onboarding.length - 1) { step += 1; render(); } else dismiss();
+    });
+    document.getElementById('ob-skip').addEventListener('click', dismiss);
+    render();
+    ob.hidden = false;
+  } else {
+    ob?.remove();
+  }
+}
 
 try {
   navigator.serviceWorker?.register('sw.js');
@@ -585,6 +637,6 @@ try {
 const m = location.hash.match(/^#\/round\/(\d+)/);
 const mc = location.hash.match(/^#\/champ\/(\d+)/);
 if (location.hash.startsWith('#/major')) startMajor();
-else if (mc) startRound(Number(mc[1]) >>> 0, false, { count: 18, label: `Championship ${mc[1]}`, hash: `#/champ/${mc[1]}` });
+else if (mc) startChampionship(Number(mc[1]));
 else if (m) startRound(Number(m[1]) >>> 0, false);
 else startRound(dailySeed(), true);
