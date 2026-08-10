@@ -64,9 +64,14 @@ export function patternPoints(from, target, sigmaScale, offsets = UNIT_OFFSETS, 
   const ux = dx / dist;
   const uy = dy / dist;
   const s = sigmas(dist, sigmaScale, profile);
+  // directional miss: a personal bias shifts the pattern MEAN sideways,
+  // scaled by carry — "my driver leaks right" as arithmetic
+  const b = (profile.bias ?? 0) * (dist / MAX_CARRY);
+  const bx = -uy * b;
+  const by = ux * b;
   return offsets.map((o) => ({
-    x: target.x + ux * o.y * s.long - uy * o.x * s.lat,
-    y: target.y + uy * o.y * s.long + ux * o.x * s.lat,
+    x: target.x + bx + ux * o.y * s.long - uy * o.x * s.lat,
+    y: target.y + by + uy * o.y * s.long + ux * o.x * s.lat,
   }));
 }
 

@@ -34,7 +34,19 @@ let aimTarget = null;
 let reveal = null; // {your, optimal, score, heat, landing}
 let holeInfo = null; // {par, yds} for the current hole
 let art = null; // offscreen course rendering, rebuilt per hole
-let profile = handicapById(localStorage.getItem('golfcms.handicap') ?? 'scratch');
+function resolveProfile(id) {
+  if (id === 'custom') {
+    try {
+      const c = JSON.parse(localStorage.getItem('golfcms.customProfile'));
+      if (c && typeof c.base === 'number') {
+        return { id: 'custom', label: 'Custom', base: c.base, longExtra: c.longExtra ?? 0, bias: c.bias ?? 0 };
+      }
+    } catch { /* fall through */ }
+  }
+  return handicapById(id);
+}
+let profile = resolveProfile(localStorage.getItem('golfcms.handicap') ?? 'scratch');
+let proMode = localStorage.getItem('golfcms.pro') === '1';
 
 const toPin = (p) => dist(p, course.hole);
 
@@ -167,9 +179,10 @@ function drawAim() {
   ctx.strokeStyle = 'rgba(255, 209, 102, 0.8)';
   ellipsePath(ball, aimTarget, lie.sigmaScale, 1); ctx.stroke();
   // the pattern itself: 48 sample shots, colored by where they finish
+  // (hidden in Pro mode — the judgment test is the point)
   const DOT = { fairway: '#ffffff', green: '#b6ffc0', rough: '#2e5230',
     sand: '#a8813a', trees: '#123a1c', wet: '#ff5c5c' };
-  for (const d of patternStats(course, ball, aimTarget, lie.sigmaScale, profile).dots) {
+  for (const d of proMode ? [] : patternStats(course, ball, aimTarget, lie.sigmaScale, profile).dots) {
     ctx.fillStyle = DOT[d.outcome];
     ctx.beginPath();
     ctx.arc((d.x + 0.5) * TILE, (d.y + 0.5) * TILE, d.outcome === 'wet' ? 3.5 : 2.5, 0, Math.PI * 2);
@@ -257,9 +270,10 @@ function updateAimReadout(lie) {
   if (stats.pct.sand) parts.push(`${stats.pct.sand}% sand`);
   if (stats.pct.trees) parts.push(`${stats.pct.trees}% trees`);
   if (stats.pct.wet) parts.push(`<span class="wet">${stats.pct.wet}% water/OB</span>`);
-  document.getElementById('pattern').innerHTML =
-    `Pattern ${yards(4 * s.lat)} × ${yards(4 * s.long)} yds · ${parts.join(' · ')}` +
-    (stats.medianLeave !== null ? ` · median leave ${yards(stats.medianLeave)} yds` : '');
+  document.getElementById('pattern').innerHTML = proMode
+    ? '🧠 Pro mode — no odds, no dots. Trust your eye; the reveal keeps score.'
+    : `Pattern ${yards(4 * s.lat)} × ${yards(4 * s.long)} yds · ${parts.join(' · ')}` +
+      (stats.medianLeave !== null ? ` · median leave ${yards(stats.medianLeave)} yds` : '');
   // haptic tick when water/OB comes into or out of play while dragging
   const wetNow = stats.pct.wet > 0;
   if (touchMode && wetNow !== hadWater) navigator.vibrate?.(12);
@@ -330,6 +344,36 @@ canvas.addEventListener('click', () => {
 
 document.getElementById('hit').addEventListener('click', () => {
   if (phase === 'aim' && aimTarget) commitDecision();
+});
+
+document.getElementById('custom-apply').addEventListener('click', () => {
+  const custom = {
+    base: Number(document.getElementById('c-width').value),
+    longExtra: Number(document.getElementById('c-long').value),
+    bias: Number(document.getElementById('c-bias').value),
+  };
+  localStorage.setItem('golfcms.customProfile', JSON.stringify(custom));
+  localStorage.setItem('golfcms.handicap', 'custom');
+  profile = resolveProfile('custom');
+  document.getElementById('custom-panel').hidden = true;
+  if (course && phase !== 'loading') {
+    verdict.textContent = 'Recalibrating the caddie for your personal pattern…';
+    setTimeout(() => {
+      V = strokesField(course, 6, profile);
+      verdict.textContent = `Caddie recalibrated for your pattern. ${yards(toPin(ball))} yds to the pin.`;
+      refresh();
+    }, 30);
+  }
+});
+
+const proBtn = document.getElementById('pro');
+proBtn.classList.toggle('active', proMode);
+proBtn.addEventListener('click', () => {
+  proMode = !proMode;
+  localStorage.setItem('golfcms.pro', proMode ? '1' : '0');
+  proBtn.classList.toggle('active', proMode);
+  if (aimTarget && phase === 'aim') updateAimReadout(lieParams(cellAt(course, ball.x, ball.y)));
+  refresh();
 });
 
 window.addEventListener('resize', () => {
@@ -455,9 +499,17 @@ for (const h of HANDICAPS) {
   o.selected = h.id === profile.id;
   hcpSel.append(o);
 }
+{
+  const o = document.createElement('option');
+  o.value = 'custom';
+  o.textContent = 'Custom…';
+  o.selected = profile.id === 'custom';
+  hcpSel.append(o);
+}
 hcpSel.addEventListener('change', () => {
-  profile = handicapById(hcpSel.value);
-  localStorage.setItem('golfcms.handicap', profile.id);
+  if (hcpSel.value === 'custom') document.getElementById('custom-panel').hidden = false;
+  profile = resolveProfile(hcpSel.value);
+  localStorage.setItem('golfcms.handicap', hcpSel.value);
   if (course && phase !== 'loading') {
     verdict.textContent = `Recalibrating the caddie for a ${profile.label.toLowerCase()} pattern…`;
     setTimeout(() => {
