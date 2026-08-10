@@ -53,6 +53,7 @@ export function initSound() {
 export function setMuted(value) {
   muted = Boolean(value);
   saveMuted(muted);
+  if (muted) stopHeartbeat();
 }
 
 export function isMuted() {
@@ -74,6 +75,113 @@ export function play(name, opts = {}) {
     fx(c, c.currentTime, opts);
   } catch {
     /* never let audio glitches break the game */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Risk heartbeat — a continuous low double-thump (lub-dub) whose rate and
+// loudness track a danger level in [0, 1]. Silent no-op everywhere Web Audio
+// is unavailable (Node, muted, blocked autoplay): the level is still tracked
+// so the UI/tests can observe it via window.__hb.
+// ---------------------------------------------------------------------------
+
+const HB_MAX_GAIN = 0.12; // gain at danger level 1
+const HB_MIN_BPM = 50;
+const HB_MAX_BPM = 110;
+const HB_LOOKAHEAD = 0.3; // seconds of audio scheduled ahead
+const HB_TICK_MS = 90; // scheduler wake-up interval
+
+let hb = null; // {gain, timer, nextBeat, level} while running
+
+function hbMirror(level) {
+  // Test/observability hook: the current heartbeat level, always up to date
+  // even when audio itself can't run.
+  try {
+    if (typeof window !== 'undefined') window.__hb = level;
+  } catch { /* ignore */ }
+}
+
+// One thump: a short 55Hz sine with a fast attack, pitch sagging as it decays.
+function hbThump(c, t0, strength) {
+  const osc = c.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(55, t0);
+  osc.frequency.exponentialRampToValueAtTime(38, t0 + 0.12);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(strength, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15);
+  osc.connect(g);
+  g.connect(hb.gain);
+  osc.start(t0);
+  osc.stop(t0 + 0.17);
+}
+
+// Lookahead scheduler: keeps a rolling window of lub-dub pairs queued so the
+// rhythm stays steady while the rate follows the live danger level.
+function hbSchedule() {
+  if (!hb || !ctx) return;
+  try {
+    if (hb.nextBeat < ctx.currentTime) hb.nextBeat = ctx.currentTime + 0.02;
+    while (hb.nextBeat < ctx.currentTime + HB_LOOKAHEAD) {
+      const bpm = HB_MIN_BPM + (HB_MAX_BPM - HB_MIN_BPM) * hb.level;
+      const period = 60 / bpm;
+      const t0 = hb.nextBeat;
+      hbThump(ctx, t0, 1); // lub
+      hbThump(ctx, t0 + Math.min(0.24, period * 0.3), 0.65); // dub
+      hb.nextBeat = t0 + period;
+    }
+  } catch {
+    /* never let audio glitches break the game */
+  }
+}
+
+/** Start the heartbeat engine (silent until setHeartbeat raises the level). */
+export function startHeartbeat() {
+  if (muted || hb) return;
+  const c = initSound();
+  if (!c) return;
+  if (c.state === 'suspended') {
+    try { c.resume(); } catch { /* autoplay policy — fine */ }
+  }
+  try {
+    const gain = c.createGain();
+    gain.gain.value = 0;
+    gain.connect(c.destination);
+    hb = { gain, level: 0, nextBeat: c.currentTime + 0.05, timer: setInterval(hbSchedule, HB_TICK_MS) };
+  } catch {
+    hb = null;
+  }
+}
+
+/** Set the danger level 0..1: scales rate (~50→110 bpm) and gain (0→~0.12). */
+export function setHeartbeat(level) {
+  const lvl = Math.min(1, Math.max(0, Number(level) || 0));
+  hbMirror(lvl);
+  if (!hb && lvl > 0) startHeartbeat();
+  if (!hb) return; // audio unavailable or muted: tracked, but silent
+  hb.level = lvl;
+  try {
+    hb.gain.gain.setTargetAtTime(HB_MAX_GAIN * lvl, ctx.currentTime, 0.08);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Stop the heartbeat entirely (commit, reveal, hole load, mute). */
+export function stopHeartbeat() {
+  hbMirror(0);
+  if (!hb) return;
+  clearInterval(hb.timer);
+  const g = hb.gain;
+  hb = null;
+  try {
+    g.gain.setTargetAtTime(0, ctx.currentTime, 0.04);
+    setTimeout(() => {
+      try { g.disconnect(); } catch { /* ignore */ }
+    }, 300);
+  } catch {
+    try { g.disconnect(); } catch { /* ignore */ }
   }
 }
 

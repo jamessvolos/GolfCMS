@@ -38,6 +38,16 @@ body {
   touch-action: none;
 }
 
+/* Reveal-only camera push-in: the transition lives ON the class, so removing
+   .push-in snaps the wrapper back instantly — aim-phase pointer math never
+   runs against a mid-transition rect. transform-origin (the ball's screen
+   position) is set inline by caddie.js. */
+#wrap.push-in {
+  transform: scale(1.08);
+  transition: transform 1.2s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
 /* ---------- shared glass ---------- */
 .glass {
   background: rgba(8, 20, 13, 0.55);
@@ -368,6 +378,14 @@ body {
   border-radius: 10px;
 }
 .ob-card .btn-primary { background: var(--accent2); color: var(--bg); border-color: var(--accent2); font-weight: 700; }
+
+/* ---------- reduced motion: no pulse-scale, no camera push-in ---------- */
+@media (prefers-reduced-motion: reduce) {
+  #wrap.push-in { transform: none; transition: none; }
+  #vignette.alarm { animation: none; }
+  #stamp-word { animation: none; opacity: 1; }
+  #stamp-chip { animation: none; opacity: 1; }
+}
 
 /* ---------- small screens / portrait cockpit ---------- */
 @media (max-width: 760px) {
