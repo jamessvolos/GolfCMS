@@ -7,12 +7,12 @@ import { substream } from '../engine/rng.js';
 import { generateCourse } from '../engine/generate.js';
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById } from '../engine/dispersion.js';
-import { strokesField, scoreDecision, aimHeatmap, expectedPutts, isHoleOver } from '../engine/strategy.js';
+import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX } from '../engine/dispersion.js';
+import { strokesField, scoreDecision, aimHeatmap, isHoleOver, scorePuttDecision, puttHeatmap, puttStats, onPuttingSurface } from '../engine/strategy.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
-import { yards, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
+import { yards, feet, holeYards, parForTiles, clubName, HOLE_LENGTHS } from '../engine/yards.js';
 import { pickWeighted, randInt } from '../engine/rng.js';
 import { renderCourseArt, drawFlag, drawBall, TILE } from './paint.js';
 import { setHeartbeat, stopHeartbeat } from './sound.js';
@@ -41,6 +41,12 @@ let aimTarget = null;
 let reveal = null; // {your, optimal, score, heat, landing}
 let holeInfo = null; // {par, yds} for the current hole
 let art = null; // offscreen course rendering, rebuilt per hole
+// --- putting state: once the ball reaches the green, every putt is a real
+// decision through the same aim/commit/reveal loop, at green resolution ---
+let putting = false; // in the putt decision loop
+let puttPos = null; // fractional ball position on the green (inches matter)
+let puttCount = 0; // putt decisions taken this hole
+let holedOut = false; // the ball is in the cup — hole strokes are real
 function resolveProfile(id) {
   if (id === 'custom') {
     try {
@@ -148,13 +154,14 @@ const SWEEP_MS = 600;
 let fx = null; // {stage:'flight'|'sweep', t0, p, from, to, dur}
 let fxRaf = 0;
 
-function startShotFx(from, to) {
+function startShotFx(from, to, opts = {}) {
   cancelFx();
   const d = Math.hypot(to.x - from.x, to.y - from.y);
   fx = {
     stage: 'flight', t0: performance.now(), p: 0,
     from: { ...from }, to: { ...to },
-    dur: Math.min(1000, 340 + d * 14),
+    putt: Boolean(opts.putt), // a putt is a low flat roll, over quicker
+    dur: opts.putt ? Math.min(600, 200 + d * 60) : Math.min(1000, 340 + d * 14),
   };
   fxRaf = requestAnimationFrame(fxTick);
 }
@@ -192,7 +199,7 @@ function drawFlight() {
     y: fx.from.y + (fx.to.y - fx.from.y) * t,
   });
   const distPx = Math.hypot(fx.to.x - fx.from.x, fx.to.y - fx.from.y) * TILE;
-  const lift = Math.min(90, 18 + distPx * 0.16);
+  const lift = fx.putt ? 0 : Math.min(90, 18 + distPx * 0.16); // putts hug the turf
   const SAMPLES = 14;
   for (let k = SAMPLES; k >= 0; k--) {
     const e = ease(Math.max(0, fx.p - k * 0.04));
@@ -279,6 +286,10 @@ function loadHole() {
     decisions = [];
     aimTarget = null;
     reveal = null;
+    putting = false;
+    puttPos = null;
+    puttCount = 0;
+    holedOut = false;
     phase = 'aim';
     const label = round.label ?? (round.daily ? copy.dailyLabel(dailyNumber()) : copy.roundLabel(round.seed));
     meta.textContent = copy.holeMeta({
@@ -299,8 +310,13 @@ function refresh() {
   if (phase === 'aim' && aimTarget) drawAim();
   if (phase === 'reveal' && reveal) drawReveal();
   const pts = decisions.reduce((s, d) => s + d.points, 0);
-  scoreEl.textContent = copy.scoreLine(strokes + 1, round.totalPoints + pts);
-  topinEl.textContent = String(yards(toPin(ball)));
+  scoreEl.textContent = copy.scoreLine(holedOut ? strokes : strokes + 1, round.totalPoints + pts);
+  // on the green the book flips to feet: "36 ft", not "12 yds"
+  const eyebrow = document.querySelector('#hud-yardage .eyebrow');
+  if (eyebrow) eyebrow.textContent = putting ? 'Ft to pin' : 'Yds to pin';
+  topinEl.textContent = putting
+    ? String(feet(toPin(puttPos ?? ball)))
+    : String(yards(toPin(ball)));
   document.getElementById('commit').hidden = phase !== 'reveal';
   document.getElementById('hit').hidden = !(touchMode && phase === 'aim' && aimTarget);
   if (phase === 'reveal' && !stampEl.hidden) positionStamp();
@@ -316,20 +332,61 @@ function drawBase() {
   ctx.restore();
   drawFlag(ctx, toScreen(course.hole));
   // during the flight comet the interpolated ball is the only ball on screen
-  if (!(fx && fx.stage === 'flight')) drawBall(ctx, toScreen(ball));
+  if (!(fx && fx.stage === 'flight')) drawBall(ctx, toScreen(putting && puttPos ? puttPos : ball));
 }
 
-function ellipsePath(from, target, sigmaScale, k) {
+function ellipsePath(from, target, sigmaScale, k, sig = null) {
   const d = Math.hypot(target.x - from.x, target.y - from.y) || 0.001;
-  const s = sigmas(d, sigmaScale, profile);
+  const s = sig ?? sigmas(d, sigmaScale, profile);
   const ang = Math.atan2(target.y - from.y, target.x - from.x);
-  const drift = windShift(course, from, target);
+  const drift = sig ? { x: 0, y: 0 } : windShift(course, from, target); // no wind on the ground
   ctx.beginPath();
   ctx.ellipse((target.x + drift.x + 0.5) * TILE, (target.y + drift.y + 0.5) * TILE,
     s.long * k * TILE, s.lat * k * TILE, ang, 0, Math.PI * 2);
 }
 
+/** Putt aim: tight ellipse, long axis ALONG the line (pace is the miss),
+ *  gold dots for samples that drop, white for the ones that stay out. */
+function drawPuttAim() {
+  beginWorld();
+  ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.beginPath();
+  ctx.moveTo((puttPos.x + 0.5) * TILE, (puttPos.y + 0.5) * TILE);
+  ctx.lineTo((aimTarget.x + 0.5) * TILE, (aimTarget.y + 0.5) * TILE);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  const d = Math.hypot(aimTarget.x - puttPos.x, aimTarget.y - puttPos.y);
+  const sig = puttSigmas(d, profile);
+  ctx.fillStyle = 'rgba(180, 235, 255, 0.20)';
+  ellipsePath(puttPos, aimTarget, 1, 2, sig); ctx.fill();
+  ctx.fillStyle = 'rgba(180, 235, 255, 0.30)';
+  ellipsePath(puttPos, aimTarget, 1, 1, sig); ctx.fill();
+  ctx.strokeStyle = 'rgba(180, 235, 255, 0.85)';
+  ellipsePath(puttPos, aimTarget, 1, 1, sig); ctx.stroke();
+  if (!proMode) {
+    for (const dot of puttStats(course, puttPos, aimTarget, profile).dots) {
+      ctx.fillStyle = dot.outcome === 'holed' ? '#ffd166' : '#ffffff';
+      ctx.beginPath();
+      ctx.arc((dot.x + 0.5) * TILE, (dot.y + 0.5) * TILE, dot.outcome === 'holed' ? 2.5 : 1.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+  // footage tag beside the target (screen space, always upright)
+  const tp = toScreen(aimTarget);
+  ctx.font = 'bold 13px system-ui';
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+  ctx.lineWidth = 3;
+  const label = `${feet(d)}ft`;
+  ctx.strokeText(label, tp.x + 12, tp.y - 10);
+  ctx.fillText(label, tp.x + 12, tp.y - 10);
+  ctx.lineWidth = 1;
+}
+
 function drawAim() {
+  if (putting) return drawPuttAim();
   const lie = lieParams(cellAt(course, ball.x, ball.y));
   beginWorld();
   ctx.setLineDash([5, 5]);
@@ -425,6 +482,7 @@ function windLabel() {
 }
 
 function setAim(pt) {
+  if (putting) return setPuttAim(pt);
   const lie = lieParams(cellAt(course, ball.x, ball.y));
   const d = Math.hypot(pt.x - ball.x, pt.y - ball.y);
   // clamp inside the ring by half a tile so rounding can't push the target
@@ -461,6 +519,46 @@ function updateAimReadout(lie) {
   hadWater = wetNow;
 }
 
+/** Putt aim stays FRACTIONAL — pace is measured in inches, not tiles — and is
+ *  clamped to the putting surface (green + ~2 tiles of fringe, capped). */
+function setPuttAim(pt) {
+  const dx = pt.x - puttPos.x;
+  const dy = pt.y - puttPos.y;
+  const d = Math.hypot(dx, dy) || 0.001;
+  let f = Math.min(1, (PUTT_MAX - 0.01) / d);
+  f = Math.max(f * d, 0.05) / d; // never aim exactly at your feet
+  // walk back toward the ball until the target sits on green/fringe
+  for (let k = 0; k < 24; k++) {
+    const t = { x: puttPos.x + dx * f, y: puttPos.y + dy * f };
+    if (onPuttingSurface(course, t.x, t.y)) {
+      aimTarget = t;
+      updatePuttReadout();
+      refresh();
+      return;
+    }
+    f *= 0.92;
+  }
+  aimTarget = { x: course.hole.x, y: course.hole.y }; // degenerate drag: aim the cup
+  updatePuttReadout();
+  refresh();
+}
+
+function updatePuttReadout() {
+  const d = Math.hypot(aimTarget.x - puttPos.x, aimTarget.y - puttPos.y);
+  const toCup = toPin(puttPos);
+  const stats = puttStats(course, puttPos, aimTarget, profile);
+  const paceFt = (d - toCup) * 48; // + past the cup, − short (along your line)
+  verdict.textContent = copy.puttAim({ ft: feet(toCup), pace: copy.paceCall(paceFt), make: stats.makePct });
+  document.getElementById('pattern').innerHTML = proMode
+    ? copy.proPattern
+    : copy.puttPatternLine({
+        make: stats.makePct, three: stats.threePct,
+        leave: stats.medianLeave !== null ? feet(stats.medianLeave) : null,
+      });
+  // no water alarm on the dance floor — the pulse tracks three-putt risk
+  setHeartbeat(Math.min(1, stats.threePct / 50));
+}
+
 function eventCoursePoint(e) {
   const r = canvas.getBoundingClientRect();
   return fromScreenPx(
@@ -471,6 +569,7 @@ function eventCoursePoint(e) {
 
 /** Touch users get a sensible starting target to nudge from. */
 function initNeutralAim() {
+  if (putting) return setPuttAim({ x: course.hole.x, y: course.hole.y });
   const lie = lieParams(cellAt(course, ball.x, ball.y));
   const d = toPin(ball);
   const f = Math.min(reach(lie, profile) * 0.7, Math.max(1, d)) / Math.max(d, 0.001);
@@ -554,7 +653,10 @@ proBtn.addEventListener('click', () => {
   proMode = !proMode;
   localStorage.setItem('golfcms.pro', proMode ? '1' : '0');
   proBtn.classList.toggle('active', proMode);
-  if (aimTarget && phase === 'aim') updateAimReadout(lieParams(cellAt(course, ball.x, ball.y)));
+  if (aimTarget && phase === 'aim') {
+    if (putting) updatePuttReadout();
+    else updateAimReadout(lieParams(cellAt(course, ball.x, ball.y)));
+  }
   refresh();
 });
 
@@ -565,6 +667,7 @@ window.addEventListener('resize', () => {
 document.getElementById('commit').addEventListener('click', advance);
 
 function commitDecision() {
+  if (putting) return commitPutt();
   const from = { ...ball };
   const lie = lieParams(cellAt(course, from.x, from.y));
   const score = scoreDecision(course, V, from, aimTarget, profile);
@@ -644,12 +747,128 @@ function commitDecision() {
   refresh();
 }
 
+/** One putt decision through the real commit path: score the pace against the
+ *  caddie's read, roll the one seeded ball, hole it or live with the leave. */
+function commitPutt() {
+  const from = { x: puttPos.x, y: puttPos.y };
+  const target = { x: aimTarget.x, y: aimTarget.y };
+  const score = scorePuttDecision(course, V, from, target, profile);
+  const heat = puttHeatmap(course, V, from, profile);
+  const roll = samplePuttRoll(course, from, target, strokes, profile);
+  const holed = puttHolesOut(from, roll, course.hole);
+  strokes += 1;
+  puttCount += 1;
+  let outcome;
+  if (holed) {
+    holedOut = true;
+    puttPos = { x: course.hole.x, y: course.hole.y };
+    ball = { ...course.hole };
+    outcome = 'holed';
+  } else {
+    const rest = restingCell(course, roll.x, roll.y);
+    if (rest.kind === 'rest') {
+      puttPos = { x: roll.x, y: roll.y };
+      ball = { x: rest.x, y: rest.y }; // integer shadow for the terrain logic
+      outcome = 'left';
+    } else {
+      strokes += 1; // raced it into the pond: penalty, replay from the same spot
+      outcome = 'penalty-water';
+    }
+  }
+  score.putt = true;
+  decisions.push(score);
+  reveal = {
+    your: target, score, heat, putt: true, holed,
+    landing: holed ? { ...course.hole } : outcome === 'left' ? { ...puttPos } : null,
+    from,
+    maxHeat: Math.max(1, ...heat.map((c) => Math.hypot(c.x - from.x, c.y - from.y))),
+  };
+  phase = 'reveal';
+  clearDanger();
+  startPushIn(reveal.landing ?? reveal.from);
+  const sg = score.sgLost;
+  const result = outcome === 'holed' ? copy.puttResult.holed
+    : outcome === 'left' ? copy.puttResult.left(feet(toPin(puttPos)))
+    : copy.puttResult['penalty-water'];
+  verdict.textContent = copy.puttVerdictLine({
+    call: copy.puttVerdictCall(sg),
+    pace: copy.paceCall(score.optimalPast * 48),
+    yourE: score.yourE.toFixed(2),
+    optimalE: score.optimalE.toFixed(2),
+    sg: sg.toFixed(2),
+    points: score.points,
+    result,
+  });
+  // make ledger: your pace vs the caddie's, in drop percentages
+  const mk = (t) => puttStats(course, from, t, profile);
+  const yourStats = mk(target);
+  const caddieStats = mk(score.optimal);
+  Object.assign(score, { yourMake: yourStats.makePct, caddieMake: caddieStats.makePct });
+  document.getElementById('pattern').innerHTML = copy.puttLedger(yourStats.makePct, caddieStats.makePct);
+  // career log: putt decisions land under their own category
+  try {
+    const KEY = 'golfcms.caddie.log.v1';
+    const log = JSON.parse(localStorage.getItem(KEY)) ?? [];
+    log.push({
+      at: Date.now(), round: round.seed, hole: round.holeIndex + 1, shot: decisions.length,
+      par: holeInfo.par, holeYds: holeInfo.yds,
+      category: 'putt',
+      sgLost: +sg.toFixed(3), points: score.points,
+      risk: yourStats.threePct, caddieRisk: caddieStats.threePct, hcp: profile.id,
+    });
+    if (log.length > 2000) log.splice(0, log.length - 2000);
+    localStorage.setItem(KEY, JSON.stringify(log));
+  } catch { /* storage blocked: career stats are best-effort */ }
+  reveal.note = {
+    title: outcome === 'holed' ? copy.puttHoledTitle : copy.noteTitle(sg),
+    tone: sg < 0.08 ? 'good' : sg < 0.2 ? 'ok' : 'bad',
+    lines: copy.noteLines({
+      sg: sg < 0.005 ? '±0.00' : '−' + sg.toFixed(2),
+      points: score.points,
+      yourE: score.yourE.toFixed(2),
+      optimalE: score.optimalE.toFixed(2),
+      yourRisk: yourStats.threePct, caddieRisk: caddieStats.threePct,
+      last: result,
+    }),
+  };
+  // low flat roll toward where the ball actually finished (or the cup)
+  startShotFx(from, holed ? course.hole : roll, { putt: true });
+  refresh();
+}
+
+/** Enter (or continue) the putt decision loop from the ball's green lie. */
+function beginPutting() {
+  putting = true;
+  puttPos = puttPos ?? { x: ball.x, y: ball.y };
+  phase = 'aim';
+  aimTarget = null;
+  reveal = null;
+  const ft = feet(toPin(puttPos));
+  verdict.textContent = puttCount === 0 ? copy.puttFirst(ft) : copy.puttNext(puttCount + 1, ft);
+  document.getElementById('pattern').textContent = '';
+  if (touchMode) initNeutralAim();
+  refresh();
+}
+
 function advance() {
   cancelFx();
   hideStamp();
   clearDanger();
   clearPushIn();
-  if (isHoleOver(course, ball) || decisions.length >= 8) return finishHole();
+  if (holedOut) return finishHole();
+  if (putting && puttCount >= 4) {
+    // mercy rule: four putt decisions is enough — concede the tap-in
+    strokes += 1;
+    holedOut = true;
+    return finishHole();
+  }
+  if (isHoleOver(course, ball)) return beginPutting(); // on the green: putt for real
+  if (putting) {
+    // the putt rolled off the green — back to a real lie and a real swing
+    putting = false;
+    puttPos = null;
+  }
+  if (decisions.filter((d) => !d.putt).length >= 8) return finishHole();
   phase = 'aim';
   aimTarget = null;
   reveal = null;
@@ -660,11 +879,13 @@ function advance() {
 }
 
 function finishHole() {
-  const putts = isHoleOver(course, ball) ? expectedPutts(dist(ball, course.hole)) : 2.5;
+  // holed out: the card shows REAL strokes, actual putts included. Only a
+  // hole abandoned at the decision cap still gets the old 2.5-putt estimate.
+  const total = holedOut ? strokes : strokes + 2.5;
   const holePts = Math.round(decisions.reduce((s, d) => s + d.points, 0) / Math.max(1, decisions.length));
   round.holes.push({
     points: holePts,
-    strokes: +(strokes + putts).toFixed(1),
+    strokes: +total.toFixed(holedOut ? 0 : 1),
     recap: decisions.map((d, i) => ({
       hole: round.holeIndex + 1, shot: i + 1, sgLost: d.sgLost,
       risk: d.yourRisk ?? 0, caddieRisk: d.caddieRisk ?? 0,
@@ -676,14 +897,20 @@ function finishHole() {
   overlay.querySelector('.big').textContent = done
     ? copy.roundScore(round.label ?? copy.genericRoundLabel, round.totalPoints, round.count * 1000)
     : copy.holeScore(round.holeIndex + 1, holePts);
-  const est = (strokes + putts).toFixed(1);
-  const vsPar = (strokes + putts - holeInfo.par).toFixed(1);
+  const vsParN = total - holeInfo.par;
+  const holeLine = holedOut
+    ? copy.holeSubReal({
+        decisions: decisions.length, strokes, putts: puttCount,
+        par: holeInfo.par, yds: holeInfo.yds,
+        vsPar: vsParN === 0 ? 'E' : vsParN > 0 ? `+${vsParN}` : `${vsParN}`,
+      })
+    : copy.holeSub({
+        decisions: decisions.length, est: total.toFixed(1), par: holeInfo.par, yds: holeInfo.yds,
+        vsPar: `${vsParN >= 0 ? '+' : ''}${vsParN.toFixed(1)}`,
+      });
   overlay.querySelector('.sub').textContent = done
     ? copy.roundSub(round.count, copy.roundGrade(round.totalPoints / (round.count * 1000)))
-    : copy.holeSub({
-        decisions: decisions.length, est, par: holeInfo.par, yds: holeInfo.yds,
-        vsPar: `${vsPar >= 0 ? '+' : ''}${vsPar}`,
-      });
+    : holeLine;
   document.getElementById('ov-next').textContent = done ? copy.newRound : copy.nextHole;
   const coach = document.getElementById('coach');
   if (done) {
@@ -747,7 +974,9 @@ hcpSel.addEventListener('change', () => {
 
 // test hooks
 window.__caddie = {
-  get state() { return { phase, ball, strokes, decisions, round, course }; },
+  get state() {
+    return { phase, ball, strokes, decisions, round, course, putting, puttPos, puttCount, holedOut };
+  },
   aimAt(x, y) { aimTarget = { x, y }; commitDecision(); },
   advance,
 };

@@ -37,6 +37,39 @@ export const copy = {
   },
   proPattern: 'Pro mode — no odds, no dots. Your read against the reveal. 🧠',
 
+  // ---- putting ----
+  // Same voice on the green: say the footage, then the pace, then nothing.
+  puttFirst: (ft) => `On the dance floor — a ${ft}-footer. Aim your pace; the ball rolls the line you set.`,
+  puttNext: (n, ft) => `Putt ${n}: a ${ft}-footer left. Pick your pace.`,
+  /** Pace call for `ft` feet past (+) or short (−) of the cup. */
+  paceCall: (ft) => {
+    const inches = Math.round(ft * 12);
+    if (Math.abs(inches) < 3) return 'dead weight at the cup';
+    const mag = Math.abs(ft) < 2 ? `${Math.abs(inches)} inches` : `${Math.round(Math.abs(ft))} feet`;
+    return ft > 0 ? `${mag} of pace past the cup` : `${mag} short of the cup`;
+  },
+  puttAim: ({ ft, pace, make }) => `${ft}-footer, playing ${pace} — ${make}% to drop.`,
+  puttPatternLine: ({ make, three, leave }) =>
+    `<span class="fw">${make}% make</span> · ${three}% three-putt risk` +
+    (leave !== null ? ` · a miss leaves ${leave} ft` : ''),
+  puttVerdictCall: (sg) =>
+    sg < 0.02 ? 'Caddie-approved — perfect pace.'
+    : sg < 0.08 ? 'Good read — a hair off the best pace.'
+    : sg < 0.2 ? 'Playable, but the pace gave a little away.'
+    : 'Costly — that pace burns putts.',
+  puttVerdictLine: ({ call, pace, yourE, optimalE, sg, points, result }) =>
+    `${call} Caddie plays ${pace} — E ${optimalE} putts vs your E ${yourE} · SG −${sg} · +${points} pts · ${result}`,
+  puttResult: {
+    holed: 'center cup — it drops! ⛳',
+    left: (ft) => `stays out — a ${ft}-footer left`,
+    'penalty-water': 'raced off the green into the water — penalty, replay the putt',
+  },
+  puttHoledTitle: 'Drained',
+  puttLedger: (yours, caddies) =>
+    `Make: your pace <span class="fw">${yours}%</span> · the caddie's read ${caddies}%.`,
+  holeSubReal: ({ decisions, strokes, putts, par, yds, vsPar }) =>
+    `${decisions} decisions · ${strokes} strokes (${putts} putt${putts === 1 ? '' : 's'}) on the par-${par}, ${yds}-yarder (${vsPar})`,
+
   // ---- the reveal ----
   verdictCall: (sg) =>
     sg < 0.02 ? 'Caddie-approved — perfect target.'
