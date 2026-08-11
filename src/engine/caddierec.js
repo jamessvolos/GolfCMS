@@ -12,7 +12,7 @@ import { cellAt } from './course.js';
 import { GREEN } from './terrain.js';
 import { HOLE_LENGTHS } from './yards.js';
 import {
-  HANDICAPS, handicapById, lieParams, sampleLanding, samplePuttRoll,
+  HANDICAPS, handicapById, lieParamsAt, sampleLanding, samplePuttRoll,
   puttHolesOut, restingCell,
 } from './dispersion.js';
 import { strokesField, scoreDecision, scorePuttDecision } from './strategy.js';
@@ -188,7 +188,7 @@ function replayHole(course, V, profile, holeRec, holeIndex) {
       if (di >= holeRec.decisions.length) fail('record ends mid-hole (swings)');
       const target = holeRec.decisions[di++];
       const from = { ...ball };
-      const lie = lieParams(cellAt(course, from.x, from.y));
+      const lie = lieParamsAt(course, from.x, from.y);
       const score = scoreDecision(course, V, from, target, profile);
       const land = sampleLanding(course, from, target, lie.sigmaScale, strokes, profile);
       const rest = restingCell(course, land.x, land.y);

@@ -5,7 +5,7 @@
 
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX, puttBreakDrift, CUP_R } from '../engine/dispersion.js';
+import { lieParams, lieParamsAt, shotPlaysLike, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX, puttBreakDrift, CUP_R } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, isHoleOver, scorePuttDecision, puttHeatmap, puttStats, onPuttingSurface } from '../engine/strategy.js';
 import { caddieHoleSeed, caddieHoleCourse, encodeCaddieRound } from '../engine/caddierec.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
@@ -704,7 +704,7 @@ function drawPuttAim() {
 
 function drawAim() {
   if (putting) return drawPuttAim();
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   beginWorld();
   ctx.setLineDash([5, 5]);
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -743,7 +743,12 @@ function drawAim() {
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = 'rgba(0,0,0,0.7)';
   ctx.lineWidth = 3;
-  const label = `${yards(carry)}y`;
+  const pl = shotPlaysLike(course, ball, aimTarget);
+  // the tag says what the shot MEASURES; the second line says what it PLAYS,
+  // and only appears when the land is actually worth a club
+  const label = Math.abs(pl.deltaYards) >= 2
+    ? `${yards(carry)}y · plays ${pl.playsYards}`
+    : `${yards(carry)}y`;
   ctx.strokeText(label, tp.x + 12, tp.y - 10);
   ctx.fillText(label, tp.x + 12, tp.y - 10);
   ctx.lineWidth = 1;
@@ -800,7 +805,7 @@ function windLabel() {
 
 function setAim(pt) {
   if (putting) return setPuttAim(pt);
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   const d = Math.hypot(pt.x - ball.x, pt.y - ball.y);
   // clamp inside the ring by half a tile so rounding can't push the target
   // past maxDist (which the evaluator would price as unreachable)
@@ -816,9 +821,12 @@ function setAim(pt) {
 function updateAimReadout(lie) {
   const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
   const leaves = toPin(aimTarget);
+  // the land's own say in the number: uphill plays longer, downhill shorter
+  const pl = shotPlaysLike(course, ball, aimTarget);
   verdict.textContent = copy.aimReadout({
     carry: yards(carry), club: clubName(carry),
     leaves: yards(leaves), atFlag: !(leaves > 1.5),
+    plays: Math.abs(pl.deltaYards) >= 2 ? pl.playsYards : null,
   });
   const s = sigmas(carry, lie.sigmaScale, profile);
   const stats = patternStats(course, ball, aimTarget, lie.sigmaScale, profile);
@@ -901,7 +909,7 @@ function eventCoursePoint(e) {
 /** Touch users get a sensible starting target to nudge from. */
 function initNeutralAim() {
   if (putting) return setPuttAim({ x: course.hole.x, y: course.hole.y });
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   const d = toPin(ball);
   const f = Math.min(reach(lie, profile) * 0.7, Math.max(1, d)) / Math.max(d, 0.001);
   setAim({ x: ball.x + (course.hole.x - ball.x) * f, y: ball.y + (course.hole.y - ball.y) * f });
@@ -1169,7 +1177,7 @@ proBtn.addEventListener('click', () => {
   proBtn.classList.toggle('active', proMode);
   if (aimTarget && phase === 'aim') {
     if (putting) updatePuttReadout();
-    else updateAimReadout(lieParams(cellAt(course, ball.x, ball.y)));
+    else updateAimReadout(lieParamsAt(course, ball.x, ball.y));
   }
   refresh();
 });
@@ -1183,7 +1191,7 @@ document.getElementById('commit').addEventListener('click', advance);
 function commitDecision() {
   if (putting) return commitPutt();
   const from = { ...ball };
-  const lie = lieParams(cellAt(course, from.x, from.y));
+  const lie = lieParamsAt(course, from.x, from.y);
   const score = scoreDecision(course, V, from, aimTarget, profile);
   const heat = aimHeatmap(course, V, from, 1, profile);
   const land = sampleLanding(course, from, aimTarget, lie.sigmaScale, strokes, profile);

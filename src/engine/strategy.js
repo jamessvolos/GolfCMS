@@ -7,9 +7,10 @@
 import { GREEN, WATER } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
 import {
-  lieParams, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE,
+  lieParamsAt, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE,
   PREVIEW_OFFSETS, puttPoints, puttSigmas, puttHolesOut, puttSkill,
   PUTT_MAX, puttBreakDrift, FEET_PER_TILE, PUTT_TABLE_OFFSETS,
+  shotShape, landingOf, BREAK_AIM_EPS,
 } from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
@@ -88,7 +89,7 @@ export function strokesField(course, sweeps = 6, profile = DEFAULT_PROFILE) {
  * @returns {{target: {x,y}, value: number}}
  */
 export function bestAim(course, V, from, stride = 1, profile = DEFAULT_PROFILE) {
-  const lie = lieParams(cellAt(course, from.x, from.y));
+  const lie = lieParamsAt(course, from.x, from.y);
   let best = { target: { x: from.x, y: from.y }, value: Infinity };
   const r = reach(lie, profile);
   for (let ty = Math.max(0, from.y - r); ty < Math.min(course.height, from.y + r + 1); ty += stride) {
@@ -107,15 +108,17 @@ export function bestAim(course, V, from, stride = 1, profile = DEFAULT_PROFILE) 
  * V over the landing pattern, with penalties for water/OB samples.
  */
 export function evaluateAim(course, V, from, target, profile = DEFAULT_PROFILE) {
-  const lie = lieParams(cellAt(course, from.x, from.y));
+  const lie = lieParamsAt(course, from.x, from.y);
   if (Math.hypot(target.x - from.x, target.y - from.y) > reach(lie, profile) + 0.01) return Infinity;
-  const pts = patternPoints(from, target, lie.sigmaScale, undefined, profile);
+  const shot = shotShape(course, from, target);
+  const pts = patternPoints(from, target, lie.sigmaScale, undefined, profile, shot);
   const drift = windShift(course, from, target);
   const fromV = inBounds(course, from.x, from.y) ? V[from.y * course.width + from.x] : 5;
   let total = 0;
   for (const p of pts) {
-    const px = p.x + drift.x;
-    const py = p.y + drift.y;
+    // the ground kicks the expectation math exactly as it kicks the one real
+    // ball — same function, so the caddie can never be reading a flatter world
+    const { x: px, y: py } = landingOf(course, from, target, p, drift);
     const rest = restingCell(course, px, py);
     if (rest.kind === 'rest') {
       // On the green, INCHES matter and tiles do not: a 48-ft cell would
@@ -309,7 +312,7 @@ export function bestPutt(course, V, from, profile = DEFAULT_PROFILE) {
   // Infinity, which used to poison the decision score with NaN points.
   const ux = d < 0.01 ? 1 : (cup.x - from.x) / d;
   const uy = d < 0.01 ? 0 : (cup.y - from.y) / d;
-  const breaks = Math.abs(puttBreakDrift(course, from, cup).cross) > 1e-9;
+  const breaks = Math.abs(puttBreakDrift(course, from, cup).cross) > BREAK_AIM_EPS;
   const laterals = breaks ? PUTT_LATERAL_GRID : [0];
   let best = { target: { x: cup.x, y: cup.y }, value: Infinity, past: 0 };
   for (const past of PUTT_PACE_GRID) {
@@ -382,7 +385,7 @@ export function puttHeatmap(course, V, from, profile = DEFAULT_PROFILE) {
 
 /** Heat data for the reveal: expected total strokes for each aim candidate. */
 export function aimHeatmap(course, V, from, stride = 1, profile = DEFAULT_PROFILE) {
-  const lie = lieParams(cellAt(course, from.x, from.y));
+  const lie = lieParamsAt(course, from.x, from.y);
   const cells = [];
   const r = reach(lie, profile);
   for (let ty = Math.max(0, from.y - r); ty < Math.min(course.height, from.y + r + 1); ty += stride) {

@@ -6,12 +6,14 @@
 // game has always used, drawn at 1 world pixel per tile-pixel. renderGreenArt()
 // is the green complex — the same ground, repainted at GREEN_SUB× resolution
 // for the putting camera, with mowing at putting pitch, a collar, shaded relief
-// and fall lines derived from the slope tiles, the cup at CUP_R, and a feet
+// and fall lines read off the ENGINE's height field (relief.js) — or, on a course
+// that carries none, off the legacy slope tiles — the cup at CUP_R, and a feet
 // grid. It covers only the green's own silhouette, so it drops onto the course
 // art with no rectangular seam and the course view never sees it.
 
 import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE, slopeDir } from '../engine/terrain.js';
 import { cellAt, inBounds } from '../engine/course.js';
+import { heightAt, pullAt, FT_PER_PULL } from '../engine/relief.js';
 import {
   CUP_R, DEFAULT_PROFILE, UNIT_OFFSETS, PUTT_OVERRUN,
   puttPoints, puttSigmas, puttHolesOut, puttBreakDrift, restingCell,
@@ -158,6 +160,10 @@ export function renderCourseArt(course) {
     }
   }
 
+  // the land itself: a hillshade of the engine's height field, laid over the
+  // mown ground before the canopies so trees keep their own shadows
+  paintCourseRelief(ctx, course, off.width, off.height);
+
   // tree canopies: clustered discs with seeded jitter, shadow, and highlight
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
@@ -191,6 +197,53 @@ export function renderCourseArt(course) {
   ctx.fillRect(0, 0, off.width, off.height);
 
   return off;
+}
+
+// Whole-property shaded relief. Unlike the green page — which normalizes to the
+// steepest reading on THAT green, so every green gets a legible picture — the
+// course view maps grade to shade ABSOLUTELY: a 10% face is full contrast and a
+// flat property produces a uniform mid-grey, which in `overlay` is a no-op. That
+// is what makes a gentle hole look gentle and a dramatic one look dramatic on
+// the same screen, instead of every hole looking equally hilly.
+const COURSE_SHADE_RES = 4; // samples per tile
+const COURSE_SHADE_FULL = 0.06; // the grade that saturates the shading
+const COURSE_SHADE_ALPHA = 0.55;
+
+function paintCourseRelief(ctx, course, w, h) {
+  const relief = course?.relief;
+  if (!relief) return;
+  const bw = Math.max(2, course.width * COURSE_SHADE_RES);
+  const bh = Math.max(2, course.height * COURSE_SHADE_RES);
+  const buf = document.createElement('canvas');
+  buf.width = bw;
+  buf.height = bh;
+  const bctx = buf.getContext('2d');
+  const img = bctx.createImageData(bw, bh);
+  const ds = 1 / COURSE_SHADE_RES;
+  for (let j = 0; j < bh; j++) {
+    const ty = (j + 0.5) * ds - 0.5;
+    for (let i = 0; i < bw; i++) {
+      const tx = (i + 0.5) * ds - 0.5;
+      const p = pullAt(relief, tx, ty); // fall line, in pull units
+      // a face falling toward the light leans into it and lights up
+      const grade = (p.x * LIGHT.x + p.y * LIGHT.y) * FT_PER_PULL / FT_PER_TILE;
+      const v = Math.max(-1, Math.min(1, grade / COURSE_SHADE_FULL));
+      const o = (j * bw + i) * 4;
+      const grey = Math.round(128 + 110 * v);
+      img.data[o] = grey;
+      img.data[o + 1] = grey;
+      img.data[o + 2] = grey;
+      img.data[o + 3] = 255;
+    }
+  }
+  bctx.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = COURSE_SHADE_ALPHA;
+  ctx.drawImage(buf, 0, 0, w, h);
+  ctx.restore();
 }
 
 // --- the green complex ------------------------------------------------------
@@ -322,7 +375,58 @@ function buildSlopeField(course, t0x, t0y, tw, th) {
   // than the softest real lean earns: a green barely touched by slope draws a
   // barely-there picture, and a flat one draws nothing at all.
   const gain = peak > 0 ? 1 / Math.max(peak, SOFTEST_LEAN) : 0;
-  return { gx, gy, tw, th, t0x, t0y, peak, gain, flat: peak <= 1e-6 };
+  return { gx, gy, tw, th, t0x, t0y, peak, gain, flat: peak <= 1e-6, source: 'tiles' };
+}
+
+// The floor on display gain for an ENGINE-derived field. The tile model's floor
+// (SOFTEST_LEAN) is the softest lean a single neighbouring slope tile can
+// produce after blurring — a quantum that a continuous field simply does not
+// have. Its analogue here is a grade a golfer would actually call a slope: 2%.
+// Below it a green draws proportionally gentler rather than being normalized up
+// to full contrast, which is what keeps a flat hole looking flat.
+const RELIEF_SOFTEST = (0.02 * FT_PER_TILE) / FT_PER_PULL;
+/** A green so level the book has nothing to say: under a fifth of a percent. */
+const RELIEF_FLAT = (0.002 * FT_PER_TILE) / FT_PER_PULL;
+
+/**
+ * The same field, read off the ENGINE's height field instead of the tile codes.
+ * `pullAt` returns the fall line in the very units buildSlopeField produces
+ * (1.0 = one SLOPE_* tile underfoot), so every layer downstream — shaded relief,
+ * fall lines, break arrows, the slope heat page, the contours — is unchanged
+ * code reading a truer field. No blur pass: the engine's field is already
+ * continuous, and smoothing it would put the picture back out of step with the
+ * physics, which is the entire point of this release.
+ */
+function buildReliefField(course, t0x, t0y, tw, th) {
+  const relief = course.relief;
+  const gx = new Float32Array(tw * th);
+  const gy = new Float32Array(tw * th);
+  for (let j = 0; j < th; j++) {
+    for (let i = 0; i < tw; i++) {
+      const p = pullAt(relief, t0x + i, t0y + j);
+      gx[j * tw + i] = p.x;
+      gy[j * tw + i] = p.y;
+    }
+  }
+  let peak = 0;
+  for (let j = 0; j < th; j++) {
+    for (let i = 0; i < tw; i++) {
+      const x = t0x + i;
+      const y = t0y + j;
+      if (!inBounds(course, x, y) || cellAt(course, x, y) !== GREEN) continue;
+      peak = Math.max(peak, Math.hypot(gx[j * tw + i], gy[j * tw + i]));
+    }
+  }
+  const gain = peak > 0 ? 1 / Math.max(peak, RELIEF_SOFTEST) : 0;
+  return { gx, gy, tw, th, t0x, t0y, peak, gain, flat: peak <= RELIEF_FLAT, source: 'relief' };
+}
+
+/** The slope field over a tile window: the engine's height field where the
+ *  course has one, the legacy slope tiles where it does not. */
+function slopeFieldFor(course, t0x, t0y, tw, th) {
+  return course?.relief
+    ? buildReliefField(course, t0x, t0y, tw, th)
+    : buildSlopeField(course, t0x, t0y, tw, th);
 }
 
 /** Bilinear read of the slope field at a fractional TILE coordinate. */
@@ -658,7 +762,7 @@ export function renderGreenArt(course, rect, { breaks = 'lines' } = {}) {
   const t0y = Math.floor(oy / TILE) - 2;
   const tw = Math.ceil(w / TILE) + 5;
   const th = Math.ceil(h / TILE) + 5;
-  const field = buildSlopeField(course, t0x, t0y, tw, th);
+  const field = slopeFieldFor(course, t0x, t0y, tw, th);
   if (!field.flat) {
     paintRelief(ctx, field, box, surfaceLip, field.gain);
     if (breaks === 'lines') paintFallLines(ctx, course, field, box, surfaceLip, field.gain);
@@ -975,7 +1079,7 @@ export function greenSlopeField(course, geo) {
   const t0y = Math.floor(geo.oy / TILE) - 2;
   const tw = Math.ceil(geo.w / TILE) + 5;
   const th = Math.ceil(geo.h / TILE) + 5;
-  return buildSlopeField(course, t0x, t0y, tw, th);
+  return slopeFieldFor(course, t0x, t0y, tw, th);
 }
 
 /** Steepest grade anywhere on this green, in percent. */
@@ -1343,13 +1447,22 @@ export function renderHeatLayer(course, rect, kind = 'slope', opts = {}) {
 }
 
 // --- 4. contours -------------------------------------------------------------
-// The slope field is a GRADIENT; a contour needs a HEIGHT. We recover one by
-// solving ∇h = −g over the window (up is against the fall line) with Jacobi
-// relaxation: each sample relaxes toward the mean of what its four neighbours
-// imply it should be, h(p) = mean_n( h(n) + g_mid·e·ds ). That is the least-
-// squares surface for the field — stable for any field, exactly zero for a flat
-// one, and it needs no integration order or seed point. Levels are then walked
-// out with marching squares at a fixed one-FOOT interval.
+// A contour needs a HEIGHT. Where the course carries relief the engine HAS one —
+// `heightAt` in feet, the very surface the ball is rolling on — so the page is
+// sampled straight off it and the picture and the physics finally describe the
+// same land.
+//
+// Where it does not (a hand-built course, an old serialized hole), the slope
+// field is only a GRADIENT, and we recover a height by solving ∇h = −g over the
+// window (up is against the fall line) with Jacobi relaxation: each sample
+// relaxes toward the mean of what its four neighbours imply it should be,
+// h(p) = mean_n( h(n) + g_mid·e·ds ). That is the least-squares surface for the
+// field — stable for any field, exactly zero for a flat one, and it needs no
+// integration order or seed point. That path is kept, unchanged, so nothing
+// that used to draw stops drawing.
+//
+// Both produce the same surface record, in PULL units (see elevationFeet), so
+// marching squares below walks either at a fixed one-FOOT interval.
 
 export const CONTOUR_RES = 4;      // elevation samples per tile
 export const CONTOUR_ITERS = 260;  // Jacobi sweeps — the window is ~50 cells wide
@@ -1374,7 +1487,7 @@ export function integrateElevation(field, { res = CONTOUR_RES, iters = CONTOUR_I
   const t0x = field.t0x;
   const t0y = field.t0y;
   const vals = new Float32Array(ew * eh);
-  const empty = { vals, ew, eh, res, t0x, t0y, min: 0, max: 0, flat: true };
+  const empty = { vals, ew, eh, res, t0x, t0y, min: 0, max: 0, flat: true, source: 'integrated' };
   if (field.flat) return empty;
   const ds = 1 / res;
   // pre-sample the gradient at every node once — the inner loop is hot
@@ -1417,7 +1530,49 @@ export function integrateElevation(field, { res = CONTOUR_RES, iters = CONTOUR_I
     if (cur[k] < min) min = cur[k];
     if (cur[k] > max) max = cur[k];
   }
-  return { vals: cur, ew, eh, res, t0x, t0y, min, max, flat: false };
+  return { vals: cur, ew, eh, res, t0x, t0y, min, max, flat: false, source: 'integrated' };
+}
+
+/**
+ * The engine's own height field, sampled over a book window into the same
+ * surface record `integrateElevation` produces — zero-meaned, in pull units, so
+ * `contourSegments` and CONTOUR_INTERVAL_PULL keep their exact meaning. This is
+ * the honest path: no integration, no relaxation, no guessing — the isolines
+ * are level sets of the surface the ball actually rolls on.
+ */
+export function reliefElevation(relief, field, { res = CONTOUR_RES } = {}) {
+  const ew = Math.max(2, Math.round(field.tw * res));
+  const eh = Math.max(2, Math.round(field.th * res));
+  const { t0x, t0y } = field;
+  const ds = 1 / res;
+  const vals = new Float32Array(ew * eh);
+  let mean = 0;
+  for (let j = 0; j < eh; j++) {
+    for (let i = 0; i < ew; i++) {
+      const v = heightAt(relief, t0x + i * ds, t0y + j * ds) / FT_PER_PULL;
+      vals[j * ew + i] = v;
+      mean += v;
+    }
+  }
+  mean /= vals.length;
+  let min = Infinity;
+  let max = -Infinity;
+  for (let k = 0; k < vals.length; k++) {
+    vals[k] -= mean;
+    if (vals[k] < min) min = vals[k];
+    if (vals[k] > max) max = vals[k];
+  }
+  return { vals, ew, eh, res, t0x, t0y, min, max, flat: max - min < 1e-6, source: 'relief' };
+}
+
+/**
+ * The elevation surface for a book window: the engine's field where the course
+ * has one, the integrated slope field where it does not.
+ */
+export function elevationSurface(course, field, opts = {}) {
+  return course?.relief
+    ? reliefElevation(course.relief, field, opts)
+    : integrateElevation(field, opts);
 }
 
 /**
@@ -1489,7 +1644,7 @@ export function renderContourLayer(course, rect, opts = {}) {
   const geo = greenBookGeometry(course, rect, opts);
   const field = opts.field ?? greenSlopeField(course, geo);
   const { off, ctx } = bookCanvas(geo);
-  const elev = field.flat ? null : integrateElevation(field, opts);
+  const elev = field.flat ? null : elevationSurface(course, field, opts);
   const interval = opts.interval ?? CONTOUR_INTERVAL_PULL;
   const segs = elev ? contourSegments(elev, interval) : [];
   if (segs.length) {
@@ -1521,6 +1676,7 @@ export function renderContourLayer(course, rect, opts = {}) {
     segments: segs.length,
     reliefFt: elev ? elevationFeet(elev.max - elev.min) : 0,
     flat: !!field.flat,
+    source: elev ? elev.source ?? 'integrated' : 'none',
   });
 }
 

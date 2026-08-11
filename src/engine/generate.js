@@ -9,6 +9,7 @@ import {
   SLOPE_N, SLOPE_S, SLOPE_E, SLOPE_W,
 } from './terrain.js';
 import { makeCourse, inBounds, cellAt, setCell, dist } from './course.js';
+import { buildRelief } from './relief.js';
 
 export const GEN_VERSION = 1;
 
@@ -127,6 +128,11 @@ export function generateCourse(seed, biome = 'classic', opts = null) {
   if (biome === 'winter') addIce(course);
   else if (biome === 'alpine') addSlopes(course);
   else if (biome === 'links') makeLinks(course);
+
+  // The land, last: relief draws from its OWN named substream and only ever
+  // reads the finished tile layout, so every classic seed keeps a byte-identical
+  // `cells` array — the regression contract, pinned in relief.test.js.
+  course.relief = buildRelief(course, seed);
 
   return course;
 }

@@ -22,8 +22,11 @@ export const copy = {
   firstAim: (yds) =>
     `${yds} yds to the pin. Move to aim — the ellipse is everywhere this shot can finish. Click the course (or tap Hit it) to play it.`,
   nextShot: (shot, yds) => `${yds} yds in. Shot ${shot} — pick your target from this lie.`,
-  aimReadout: ({ carry, club, leaves, atFlag }) =>
-    `${carry}-yd carry, ${club}` + (atFlag ? ' — going at the flag.' : ` · leaves ${leaves} yds.`),
+  // `plays` is the elevation-adjusted number when the land moves it: the
+  // caddie's own "165 yds — plays 178".
+  aimReadout: ({ carry, club, leaves, atFlag, plays }) =>
+    `${carry}-yd carry` + (plays ? ` — plays ${plays}` : '') + `, ${club}`
+    + (atFlag ? ' — going at the flag.' : ` · leaves ${leaves} yds.`),
   patternLine: ({ w, l, pct, medianLeave }) => {
     const parts = [];
     if (pct.green) parts.push(`<span class="fw">${pct.green}% green</span>`);
