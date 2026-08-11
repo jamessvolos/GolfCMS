@@ -13,7 +13,8 @@ import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
 import { yards, feet, holeYards, parForTiles, clubName } from '../engine/yards.js';
 import {
-  renderCourseArt, renderGreenArt, drawFlag, drawBall, drawPin, drawBallWorld, TILE,
+  renderCourseArt, renderGreenBook, drawFlag, drawBall, drawPin, drawBallWorld,
+  legendFor, TILE,
 } from './paint.js';
 import {
   makeCamera, worldToScreen, screenToWorld, worldTransform, courseCamera,
@@ -52,6 +53,18 @@ let art = null; // offscreen course rendering, rebuilt per hole
 // it costs one build per hole and nothing per frame. paint.js: renderGreenArt.
 let greenArt = null;
 const greenArtStats = { builds: 0, buildMs: 0, draws: 0 };
+// Which page of the yardage book is showing under the break arrows: the slope
+// heat (how steep, in percent), the cost heat (expected putts from here — the
+// page a printed book cannot draw), or none. Break arrows are always on.
+const HEAT_KEY = 'golfcms.greenPage.v1';
+const HEAT_PAGES = [null, 'slope', 'cost'];
+let heatPage = (() => {
+  try {
+    const v = localStorage.getItem(HEAT_KEY);
+    return HEAT_PAGES.includes(v) ? v : null;
+  } catch { return null; }
+})();
+let heatBtn = null;
 let lastFrameMs = 0; // wall time of the most recent refresh(), for perf checks
 // --- putting state: once the ball reaches the green, every putt is a real
 // decision through the same aim/commit/reveal loop, at green resolution ---
@@ -188,10 +201,35 @@ function findGreenRect() {
  *  opens — a hole abandoned before the green never pays for it. */
 function ensureGreenArt() {
   if (greenArt || !greenRect || !course) return greenArt;
-  greenArt = renderGreenArt(course, greenRect);
+  greenArt = renderGreenBook(course, greenRect, {
+    heat: heatPage, profile, V,
+    holeNumber: round ? round.holeIndex + 1 : null,
+  });
   greenArtStats.builds += 1;
-  greenArtStats.buildMs = +greenArt.ms.toFixed(2);
+  greenArtStats.buildMs = +(greenArt.ms.total ?? 0);
   return greenArt;
+}
+
+/** Swap the book's heat page. paint.js caches every layer per hole, so
+ *  flipping pages re-composites rather than re-deriving the green. */
+function setHeatPage(kind) {
+  heatPage = kind;
+  try {
+    localStorage.setItem(HEAT_KEY, kind ?? 'none');
+  } catch { /* private mode: the page choice just won't persist */ }
+  if (heatBtn) {
+    const legend = kind ? legendFor(kind) : null;
+    heatBtn.textContent = kind === 'slope' ? 'Slope' : kind === 'cost' ? 'Cost' : 'Break';
+    heatBtn.title = legend
+      ? `Green page: ${legend.label} (${legend.min}–${legend.max}${legend.unit}). Click to change.`
+      : 'Green page: break arrows only. Click to change.';
+    heatBtn.classList.toggle('active', Boolean(kind));
+  }
+  if (greenRect && course) {
+    greenArt = null; // the composite changed; the cached layers under it did not
+    if (camMode === 'green') ensureGreenArt();
+    refresh();
+  }
 }
 
 /** Is the detail layer the one on screen right now? */
@@ -600,7 +638,11 @@ function drawBase() {
   if (onGreenArt()) {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(greenArt.canvas, greenArt.ox, greenArt.oy, greenArt.w, greenArt.h);
+    // the book is a stack: turf, heat page, contours, break arrows, furniture —
+    // each its own cached canvas over the same world box
+    for (const L of greenArt.layers) {
+      ctx.drawImage(L.canvas, greenArt.geo.ox, greenArt.geo.oy, greenArt.geo.w, greenArt.geo.h);
+    }
     greenArtStats.draws += 1;
   }
   ctx.restore();
@@ -1051,6 +1093,9 @@ window.addEventListener('keydown', (e) => {
   } else if (k === 'r') {
     e.preventDefault();
     recenter();
+  } else if (k === 'g') {
+    e.preventDefault();
+    cycleHeatPage();
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -1064,6 +1109,14 @@ window.addEventListener('blur', () => { peekDownAt = 0; });
 
 peekBtn?.addEventListener('click', () => setPeek(!peeking));
 document.getElementById('recenter')?.addEventListener('click', recenter);
+
+/** Break → Slope → Cost → Break. */
+function cycleHeatPage() {
+  setHeatPage(HEAT_PAGES[(HEAT_PAGES.indexOf(heatPage) + 1) % HEAT_PAGES.length]);
+}
+heatBtn = document.getElementById('greenpage');
+heatBtn?.addEventListener('click', cycleHeatPage);
+setHeatPage(heatPage); // paint the button's initial label
 
 canvas.addEventListener('click', () => {
   if (touchMode) return; // touch commits via the Hit button; taps advance reveals
@@ -1535,10 +1588,12 @@ window.__caddie = {
       approachRect: approachRect ? { ...approachRect } : null,
       // the green complex: whether it exists, what it cost, how often it drew
       greenArt: greenArt
-        ? { w: greenArt.w, h: greenArt.h, sub: greenArt.sub, sloped: greenArt.sloped,
-            px: greenArt.canvas.width, ...greenArtStats }
+        ? { w: greenArt.geo.w, h: greenArt.geo.h, sub: greenArt.geo.sub,
+            sloped: greenArt.sloped, peakPct: greenArt.peakPct,
+            layers: greenArt.layers.map((L) => L.kind), ms: greenArt.ms,
+            px: greenArt.layers[0]?.canvas.width ?? 0, ...greenArtStats }
         : null,
-      greenArtLive: onGreenArt(), frameMs: +lastFrameMs.toFixed(2) };
+      heatPage, greenArtLive: onGreenArt(), frameMs: +lastFrameMs.toFixed(2) };
   },
   aimAt(x, y) { aimTarget = { x, y }; commitDecision(); },
   advance,
