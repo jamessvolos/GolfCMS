@@ -14,7 +14,7 @@ import { courseName } from '../engine/namer.js';
 import { yards, feet, holeYards, parForTiles, clubName } from '../engine/yards.js';
 import {
   renderCourseArt, renderGreenBook, drawFlag, drawBall, drawPin, drawBallWorld,
-  legendFor, TILE,
+  legendFor, TILE, renderCostImage, coneBeamPath, CONE_ALPHA,
 } from './paint.js';
 import {
   makeCamera, worldToScreen, screenToWorld, worldTransform, courseCamera,
@@ -39,6 +39,7 @@ const modeSel = document.getElementById('mode');
 let round = null; // {seed, daily, holeIndex, holes: [{points, strokes}], totalPoints}
 let course = null;
 let V = null;
+let costImage = null; // release E: V as greyscale, one pixel per tile, cached per hole
 let ball = null;
 let strokes = 0;
 let decisions = [];
@@ -573,6 +574,7 @@ function loadHole() {
     const lengthTiles = dist(course.tee, course.hole);
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
+    costImage = null;
     art = renderCourseArt(course);
     greenArt = null; // new hole, new green — rebuilt on the first putt
     greenRect = findGreenRect();
@@ -609,6 +611,7 @@ function loadHole() {
 function refresh() {
   const t0 = performance.now();
   drawBase();
+  if (phase === 'aim' && aimTarget) drawCone();
   if (phase === 'aim' && aimTarget) drawAim();
   if (phase === 'reveal' && reveal) drawReveal();
   const pts = decisions.reduce((s, d) => s + d.points, 0);
@@ -653,6 +656,63 @@ function drawBase() {
   else drawFlag(ctx, toScreen(course.hole));
   // during the flight comet the interpolated ball is the only ball on screen
   if (!(fx && fx.stage === 'flight')) paintBall(toScreen(putting && puttPos ? puttPos : ball));
+}
+
+/**
+ * THE EXPECTED-STROKES CONE.
+ *
+ * The caddie has always known what every tile on the hole costs — that is `V`,
+ * the field the entire scoring model is built on — and until now the only way
+ * to see it was the reveal heatmap, which arrives *after* the decision.
+ *
+ * This puts it in front of the player while they are still choosing, without
+ * turning the hole into a chart. The rules it obeys:
+ *
+ *   NO COLOUR, NO NUMBERS. Cheap ground is lit, expensive ground is in shadow.
+ *   `soft-light` at 18% bends the art's luminance and leaves its hue alone, so
+ *   the result reads as weather rather than as an overlay.
+ *   ONLY WHERE THE BALL COULD GO. The field is clipped to a dispersion-shaped
+ *   beam. Shading ground this swing cannot reach would be answering a question
+ *   nobody asked.
+ *   OFF IN PRO MODE, like every other aid — Pro is the judgment test.
+ */
+function drawCone() {
+  if (proMode || !V || !course) return;
+  const from = putting && puttPos ? puttPos : ball;
+  // The field image is normalised to what THIS swing can reach, so it is cached
+  // per lie rather than per hole — rebuilt when the ball moves, never per frame.
+  const key = `${from.x},${from.y},${putting ? 'p' : 's'}`;
+  if (!costImage || costImage.key !== key) {
+    const r = putting ? PUTT_MAX : reach(lieParamsAt(course, from.x, from.y), profile);
+    costImage = { key, canvas: renderCostImage(course, V, { from, reach: r }) };
+  }
+  const dist = Math.hypot(aimTarget.x - from.x, aimTarget.y - from.y);
+  if (dist < 0.4) return;
+
+  // sigma at a fraction of the way out, from the same functions the pattern
+  // ellipse and the engine use — a cone that flared differently from the real
+  // dispersion would be a lie told softly
+  const lie = putting ? null : lieParamsAt(course, from.x, from.y);
+  const sigmaAt = putting
+    ? (t) => puttSigmas(Math.max(0.05, dist * t), profile)
+    : (t) => sigmas(Math.max(0.05, dist * t), lie.sigmaScale, profile);
+  // ...and on a putt the beam follows the BREAK, because the ball does
+  const bend = putting ? puttBreakDrift(course, from, aimTarget) : { x: 0, y: 0 };
+
+  beginWorld();
+  ctx.save();
+  if (coneBeamPath(ctx, from, aimTarget, sigmaAt, bend)) {
+    ctx.clip();
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.globalAlpha = CONE_ALPHA;
+    // one pixel per tile, drawn across the whole board with smoothing on: the
+    // bilinear upscale is what stops a coarse field looking like a mosaic
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(costImage.canvas, 0, 0, course.width * TILE, course.height * TILE);
+  }
+  ctx.restore();
+  ctx.restore(); // beginWorld
 }
 
 function ellipsePath(from, target, sigmaScale, k, sig = null) {
@@ -1166,6 +1226,7 @@ document.getElementById('custom-apply').addEventListener('click', () => {
     verdict.textContent = copy.recalibratingCustom;
     setTimeout(() => {
       V = strokesField(course, 6, profile);
+    costImage = null;
       verdict.textContent = copy.recalibratedCustom(yards(toPin(ball)));
       refresh();
     }, 30);
@@ -1582,6 +1643,7 @@ hcpSel.addEventListener('change', () => {
     verdict.textContent = copy.recalibratingHcp(profile.label.toLowerCase());
     setTimeout(() => {
       V = strokesField(course, 6, profile);
+    costImage = null;
       verdict.textContent = copy.recalibratedHcp(profile.label.toLowerCase(), yards(toPin(ball)));
       refresh();
     }, 30);
@@ -1620,6 +1682,7 @@ window.__caddie = {
     greenArt = null;
     greenRect = findGreenRect();
     V = strokesField(course, 6, profile);
+    costImage = null;
     if (putting) ensureGreenArt();
     refresh();
   },

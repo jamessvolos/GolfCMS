@@ -2088,3 +2088,166 @@ export function renderGreenBook(course, rect, opts = {}) {
     ms,
   };
 }
+
+// --- the expected-strokes cone -----------------------------------------------
+// Release E. The caddie already knows, for every tile on the hole, what it
+// costs to finish there — that is `V`, the field the whole scoring model is
+// built on. Until now the only way to see it was the reveal heatmap, which is
+// a wall of colour that arrives after the decision is made.
+//
+// The cone shows it DURING the decision, and the design constraint is that it
+// must not read as data. No colour, no legend, no numbers: cheap ground is
+// lit, expensive ground falls into shadow, and the eye reads it as terrain the
+// sun happens to be catching. It is drawn in `soft-light` at a very low alpha
+// for exactly that reason — the mode preserves the art's own hue and contrast
+// and only bends its luminance, so at 18% the picture looks like a photograph
+// taken in better light rather than a picture with a chart on top.
+//
+// Two pieces, split by how often they change:
+//   FIELD IMAGE — one greyscale pixel per TILE, cached per (hole, profile).
+//     Drawn scaled with smoothing on, which is the bilinear upscale: `V` is a
+//     coarse field and a coarse field drawn sharp looks like a mosaic.
+//   BEAM — recomputed per frame, because it follows the aim. Cheap: it is a
+//     path, and the field image is clipped to it.
+
+/** How far from neutral grey the field image is allowed to swing. */
+export const CONE_SWING = 96;
+/** The alpha the cone is composited at. Above about a fifth it stops reading
+ *  as light and starts reading as a chart. */
+export const CONE_ALPHA = 0.18;
+
+/**
+ * The greyscale cost image: one pixel per tile, 128 where the ground is
+ * averagely expensive, lighter where it is cheap, darker where it is dear.
+ *
+ * Normalised against the field's own spread rather than an absolute scale, so
+ * a 500-yard par 5 and a 150-yard par 3 both use the full range — the question
+ * the cone answers is "which of the ground in front of me is better", and that
+ * is a relative question.
+ *
+ * @param {import('../engine/course.js').Course} course
+ * @param {Float64Array|Array<number>} V the expected-strokes field
+ * @returns {HTMLCanvasElement} `course.width` x `course.height` pixels
+ */
+export function renderCostImage(course, V, opts = {}) {
+  const c = document.createElement('canvas');
+  c.width = course.width;
+  c.height = course.height;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(course.width, course.height);
+  const shades = costShades(course, V, opts);
+  for (let i = 0; i < shades.length; i++) {
+    const o = i * 4;
+    img.data[o] = shades[i];
+    img.data[o + 1] = shades[i];
+    img.data[o + 2] = shades[i];
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/**
+ * The greyscale itself, as plain numbers — one byte per tile, in row-major
+ * order. Split out from the canvas so the arithmetic that decides what is lit
+ * and what is shadowed can be tested without a DOM.
+ *
+ * @returns {Uint8ClampedArray} `course.width * course.height` shades
+ */
+export function costShades(course, V, { from = null, reach = Infinity } = {}) {
+  const out = new Uint8ClampedArray(course.width * course.height).fill(128);
+
+  // Normalised over THE GROUND THIS SWING CAN REACH, not over the whole hole.
+  // Normalising globally was the first version and it made the cone useless:
+  // a 400-yard hole spans four strokes of expectation end to end, so the two
+  // or three tenths that separate the good half of a landing zone from the bad
+  // half compressed into a single shade and the beam lit up uniformly. The
+  // cone's question is "which of the ground in front of me is better", and the
+  // answer has to be scaled to the ground in front of you.
+  //
+  // Percentile bounds, not min/max: one unreachable tile priced at a penalty
+  // would otherwise flatten everything else back to grey.
+  const finite = [];
+  for (let y = 0; y < course.height; y++) {
+    for (let x = 0; x < course.width; x++) {
+      const v = V[y * course.width + x];
+      if (!Number.isFinite(v)) continue;
+      if (from && Math.hypot(x - from.x, y - from.y) > reach + 2) continue;
+      finite.push(v);
+    }
+  }
+  if (finite.length < 4) return out;
+  finite.sort((a, b) => a - b);
+  const lo = finite[Math.floor(finite.length * 0.08)];
+  const hi = finite[Math.floor(finite.length * 0.88)];
+  const span = Math.max(0.12, hi - lo);
+
+  for (let i = 0; i < out.length; i++) {
+    const v = Number.isFinite(V[i]) ? V[i] : hi;
+    // 0 at the cheapest ground, 1 at the dearest
+    const t = Math.max(0, Math.min(1, (v - lo) / span));
+    // ease so the middle stays near neutral and the extremes carry the signal:
+    // a linear ramp tints everything and distinguishes nothing
+    const e = t * t * (3 - 2 * t);
+    out[i] = Math.round(128 + CONE_SWING * (0.5 - e));
+  }
+  return out;
+}
+
+/**
+ * The beam: the ground this swing could actually reach, as a path in WORLD
+ * pixels. Widens with the real lateral sigma at each distance — so it flares
+ * the way dispersion actually flares, superlinearly, rather than as a straight
+ * wedge — and is capped just past the target by the depth sigma.
+ *
+ * `bend` displaces the centre line progressively, which is how a putt's cone
+ * follows the break instead of pointing at where the ball is aimed.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{x,y}} from ball, in tiles
+ * @param {{x,y}} target aim point, in tiles
+ * @param {(t: number) => {long: number, lat: number}} sigmaAt sigma at a
+ *   fraction `t` of the way to the target
+ * @param {{x: number, y: number}} [bend] total lateral drift at the target
+ * @param {number} [k] how many sigma wide
+ */
+export function coneBeamPath(ctx, from, target, sigmaAt, bend = { x: 0, y: 0 }, k = 2.1) {
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return false;
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+  const STEPS = 18;
+  const left = [];
+  const right = [];
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const s = sigmaAt(t);
+    // the beam starts at a point and opens: at the ball there is no spread yet
+    const w = k * s.lat * Math.min(1, 0.12 + t * 1.1);
+    // break accumulates with the SQUARE of progress — a putt barely moves in
+    // its first foot and does most of its bending as it dies
+    const b = t * t;
+    const cx = from.x + ux * len * t + bend.x * b;
+    const cy = from.y + uy * len * t + bend.y * b;
+    left.push([(cx + nx * w + 0.5) * TILE, (cy + ny * w + 0.5) * TILE]);
+    right.push([(cx - nx * w + 0.5) * TILE, (cy - ny * w + 0.5) * TILE]);
+  }
+  // and a rounded cap `k` depth-sigma past the target, because coming up short
+  // and running through are both real
+  const endSig = sigmaAt(1);
+  const cap = k * endSig.long;
+  const ex = from.x + ux * len + bend.x;
+  const ey = from.y + uy * len + bend.y;
+  ctx.beginPath();
+  ctx.moveTo(left[0][0], left[0][1]);
+  for (const p of left) ctx.lineTo(p[0], p[1]);
+  ctx.ellipse((ex + 0.5) * TILE, (ey + 0.5) * TILE,
+    cap * TILE, k * endSig.lat * TILE, Math.atan2(uy, ux), -Math.PI / 2, Math.PI / 2);
+  for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
+  ctx.closePath();
+  return true;
+}

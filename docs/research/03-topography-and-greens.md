@@ -213,3 +213,30 @@ improvement is real but modest, because M1's 0.10-stroke tie threshold is
 strict and this engine's expected-strokes field is steep. Loosening the
 threshold would have made the release look better and mean less, so it was left
 at the value `01` specified.
+
+## W-E as shipped — the cone
+
+Built as specified, with one correction found by looking at it.
+
+**The scale has to be local.** The first version normalised `V` across the
+whole hole. On a 400-yard par 4 that spans about four strokes of expectation
+end to end, so the two or three tenths separating the good half of a landing
+zone from the bad half compressed into a single shade and the beam lit up
+uniformly — a picture of nothing. The cost image is now normalised over the
+ground *this swing can reach*, and cached per lie rather than per hole. The
+cone's question is "which of the ground in front of me is better", and the
+answer has to be scaled to the ground in front of you.
+
+The rest held: one greyscale pixel per tile, drawn scaled with smoothing on
+(that is the bilinear upscale — a coarse field drawn sharp looks like a
+mosaic), clipped to a beam whose half-width follows the real lateral sigma at
+each distance so it flares superlinearly the way dispersion actually does,
+capped past the target by the depth sigma, composited in `soft-light` at 18%.
+On a putt the beam bends with `puttBreakDrift`, and bends LATE — displacement
+grows with the square of progress, because a putt barely moves in its first
+foot and does most of its work as it dies.
+
+`costShades` is split out from `renderCostImage` so the arithmetic that decides
+what is lit and what is shadowed is testable without a DOM: cheap ground is
+strictly lighter than dear ground, water shades below fairway, a degenerate
+field falls back to neutral rather than to noise.
