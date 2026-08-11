@@ -143,3 +143,73 @@ B is the biggest (a new engine dimension touching physics and art); C is the
 most visible; D is where the puzzles finally get *meaningful*; E is the payoff
 display. Each ships behind the existing regression wall: classic seeds
 byte-identical where they should be, 173+ tests green, browser-verified.
+
+---
+
+## W-D as shipped — what the measurements actually said
+
+Release D is the first one where the plan above was wrong in ways worth writing
+down, because the instrument (`certify.js`) was built before the generator and
+then kept disagreeing with it.
+
+**The literal reading of G2 makes holes worse.** "Move the landing-zone hazard
+off the centre line and onto the pin side" was implemented exactly as written
+and the measured fork rate fell from 30% to zero. A hazard beside a wide
+fairway does not create two options; it creates one option with a bruise on it.
+The expected-strokes field stays a single smooth basin whose floor has moved a
+couple of tiles away from the sand — no ridge, so no decision.
+
+**A fork needs a wall, and progress beats angle.** Two attempts followed. The
+first separated the options LATERALLY — a narrow shelf on one flank, a wide bail
+on the other, a wall between. It never tied: every tile sideways costs real
+progress toward the green, and in this engine the angle gained is not worth the
+advance given up. The second separated them by CARRY — a hazard band across the
+corridor with a lay-up short of it and a landing area beyond — and that ties,
+because the value of the extra progress and the cost of the risk are both
+continuous in one number (where the band sits) and can be tuned against each
+other. `LZ_SHAPE` is that tuning surface.
+
+**The angle rule is the opposite of the obvious one.** A pin tucked behind a
+left-hand bunker is short-sided FROM the left. The flank worth driving to is
+the one away from the tuck, which is why `shelfSide === -tuckSide`.
+
+**A tuning pass will happily tune a bug.** An early band was placed from its
+near edge outward, so a deep band pushed its own far edge past the driver and
+the "carry target", clamped back to maximum reach, sat inside the hazard. The
+fork rate went UP, because the aim heatmap was reading an unclearable wall. The
+band is now placed from the far edge inward, and both aim points are chosen as
+TILES inside a permitted annulus rather than as floats rounded afterwards —
+rounding moves a point by up to 0.7 tiles, enough to drop a target computed at
+14.1 tiles back onto the tile at 13.6.
+
+**G3's premise was wrong.** It estimated the classic corridor at 24–40 yards
+from the fairway stamp radius. Measured against the tee→cup line the real thing
+is far wider, because the spine wanders a tile per step: a corridor hugging the
+route within 2.5 tiles still sweeps five or six tiles either side of the
+straight line. The stage survives for its ASYMMETRY, not its width, and is
+tested by which side of the hole the newly mown ground lands on (37/40 holes
+favour the bail side, median 5.7×).
+
+**Par 3s are not applicable, not failures.** M1 asks whether there are two
+viable lines. On a one-shotter there is one, at the green, and that is correct
+golf. `certifyHole` reports `applicable: false` below `TEE_FORK_MIN`, and
+`certifySweep` reports both rates. Certifying a par 3 needs a green-scale
+metric; release D does not have one and does not pretend to.
+
+### The numbers (42 par-4/5 holes per generator, six lengths, scratch profile)
+
+| | classic | strategic |
+|---|---|---|
+| M1 fork | 8/42 (19%) | 14/42 (**33%**) |
+| M3 centre-line penalty | 25/42 (60%) | 29/42 (**69%**) |
+| median second-basin gap, 22t | 0.277 | **0.118** |
+| median second-basin gap, 26t | 0.766 | **0.090** |
+| median second-basin gap, 33t | 0.127 | **0.117** |
+
+The honest summary: the *gap* result is strong and consistent — the second-best
+line on a strategic hole is much closer in value to the best one, which is what
+turns "there is an answer" into "there is an argument". The M1 pass RATE
+improvement is real but modest, because M1's 0.10-stroke tie threshold is
+strict and this engine's expected-strokes field is steep. Loosening the
+threshold would have made the release look better and mean less, so it was left
+at the value `01` specified.

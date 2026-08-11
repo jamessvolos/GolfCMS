@@ -6,9 +6,18 @@
 // putting-camera art at putting resolution. One disc repeated fifty times was
 // invisible on the course sheet and unmissable on this one, which is exactly
 // why the sheet exists.
+//
+// Release D added the third: 24 STRATEGIC ROUTINGS, with the plan drawn ON the
+// hole — the carry band it laid, the lay-up and the shelf it left either side
+// of it, and the line of play they are measured against. A fork is a claim
+// about geometry, and this sheet is where the claim is visible instead of
+// merely asserted in a test.
 
 import { generateCourse, ARCHETYPES } from '../engine/generate.js';
 import { GREEN_ARCHETYPES } from '../engine/greens.js';
+import { TEMPLATES } from '../engine/strategic.js';
+import { HOLE_LENGTHS } from '../engine/yards.js';
+import { substream, pickWeighted, randInt } from '../engine/rng.js';
 import { cellAt } from '../engine/course.js';
 import { GREEN } from '../engine/terrain.js';
 import { terrainColor } from './render.js';
@@ -142,13 +151,115 @@ function renderGreens(biome, base) {
     + GREEN_ARCHETYPES.map((a) => `${a} ${counts[a]}`).join(' · ');
 }
 
+/** A hole the way Caddie builds one: a length band drawn from the seed. */
+function caddieLength(seed) {
+  const r = substream(seed >>> 0, 'yardage');
+  const band = pickWeighted(r, HOLE_LENGTHS.map((b) => [b, b.weight]));
+  return { tiles: randInt(r, band.min, band.max), par: band.par };
+}
+
+/** One strategic routing, with the PLAN drawn over it. */
+function drawStrategy(canvas, course) {
+  const s = course.strategy;
+  const px = 11;
+  canvas.width = course.width * px;
+  canvas.height = course.height * px;
+  const ctx = canvas.getContext('2d');
+  for (let y = 0; y < course.height; y++) {
+    for (let x = 0; x < course.width; x++) {
+      ctx.fillStyle = terrainColor(cellAt(course, x, y));
+      ctx.fillRect(x * px, y * px, px, px);
+    }
+  }
+  const P = (p) => [(p.x + 0.5) * px, (p.y + 0.5) * px];
+
+  // the line of play, which every number in the plan is measured against
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(...P(course.tee));
+  ctx.lineTo(...P(course.hole));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // the carry band, as the two arcs the player is actually judging
+  if (s.carryBand) {
+    const [tx, ty] = P(course.tee);
+    ctx.strokeStyle = 'rgba(255,214,102,0.85)';
+    ctx.lineWidth = 1.5;
+    for (const r of [s.carryBand.near, s.carryBand.far]) {
+      ctx.beginPath();
+      ctx.arc(tx, ty, r * px, -Math.PI / 2.2, Math.PI / 2.2);
+      ctx.stroke();
+    }
+  }
+
+  // the two arms of the fork
+  if (s.targets) {
+    const ring = (p, color, label) => {
+      const [x, y] = P(p);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(6, p.r * px), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = '600 10px ui-sans-serif, system-ui';
+      ctx.fillText(label, x + 8, y - 6);
+    };
+    ring(s.targets.bail, '#7ee0a0', 'lay up');
+    ring(s.targets.aggressive, '#ff8a5c', 'carry');
+  }
+
+  // tee and cup last, so nothing draws over them
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(course.tee.x * px - 1, course.tee.y * px - 1, px + 2, px + 2);
+  ctx.fillStyle = '#e74c3c';
+  ctx.fillRect(course.hole.x * px - 1, course.hole.y * px - 1, px + 2, px + 2);
+}
+
+function renderStrategy(biome, base) {
+  const counts = Object.fromEntries(TEMPLATES.map((t) => [t, 0]));
+  let forked = 0;
+  let seed = base >>> 0;
+  for (let i = 0; i < 24; i++) {
+    const { tiles, par } = caddieLength(seed);
+    const course = generateCourse(seed, biome, { holeDistTiles: tiles, strategic: true });
+    const s = course.strategy;
+    counts[s.template] = (counts[s.template] ?? 0) + 1;
+    if (s.targets) forked++;
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    const canvas = document.createElement('canvas');
+    canvas.title = `seed ${seed}`;
+    cell.append(canvas);
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const band = s.carryBand
+      ? `carry ${(s.carryBand.near * 16).toFixed(0)}–${(s.carryBand.far * 16).toFixed(0)} yds of ${s.carryBand.kind}`
+      : 'no carry band — the green is the whole decision';
+    meta.innerHTML = `<b>${s.template}</b> · par ${par} · ${(tiles * 16)} yds`
+      + `<br>${band}`
+      + `<br><span class="dim">shelf ${s.sideName} · ${course.green.archetype} green, pin ${course.green.pin.name}</span>`;
+    cell.append(meta);
+    grid.append(cell);
+    drawStrategy(canvas, course);
+    seed = (seed + 1) >>> 0;
+  }
+  info.textContent = `${forked}/24 holes forked · templates: `
+    + TEMPLATES.map((t) => `${t} ${counts[t]}`).join(' · ');
+}
+
 function render() {
   const biome = document.getElementById('biome').value;
   const mode = modeSel ? modeSel.value : 'courses';
   const base = (Math.random() * 0xffffffff) >>> 0;
   grid.innerHTML = '';
   grid.classList.toggle('greens', mode === 'greens');
+  grid.classList.toggle('strategy', mode === 'strategy');
   if (mode === 'greens') renderGreens(biome, base);
+  else if (mode === 'strategy') renderStrategy(biome, base);
   else renderCourses(biome, base);
 }
 
@@ -156,12 +267,15 @@ document.getElementById('biome').addEventListener('change', render);
 document.getElementById('reroll').addEventListener('click', render);
 if (modeSel) modeSel.addEventListener('change', render);
 
-// A deterministic sheet for the release evidence: #greens=<seed> pins it.
-const m = location.hash.match(/^#greens=(\d+)$/);
+// Deterministic sheets for the release evidence: #greens=<seed>, #strategy=<seed>.
+const m = location.hash.match(/^#(greens|strategy)=(\d+)$/);
 if (m) {
-  if (modeSel) modeSel.value = 'greens';
-  grid.classList.add('greens');
-  renderGreens(document.getElementById('biome').value, Number(m[1]) >>> 0);
+  const [, sheet, seed] = m;
+  if (modeSel) modeSel.value = sheet;
+  grid.classList.add(sheet);
+  const biome = document.getElementById('biome').value;
+  if (sheet === 'greens') renderGreens(biome, Number(seed) >>> 0);
+  else renderStrategy(biome, Number(seed) >>> 0);
 } else {
   render();
 }

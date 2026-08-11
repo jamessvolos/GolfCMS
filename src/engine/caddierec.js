@@ -40,7 +40,14 @@ export function caddieHoleCourse(holeSeed) {
   const lenRng = substream(holeSeed, 'yardage');
   const band = pickWeighted(lenRng, HOLE_LENGTHS.map((b) => [b, b.weight]));
   const biome = lenRng() < 0.28 ? 'links' : 'classic';
-  return generateCourse(holeSeed, biome, { holeDistTiles: randInt(lenRng, band.min, band.max) });
+  return generateCourse(holeSeed, biome, {
+    holeDistTiles: randInt(lenRng, band.min, band.max),
+    // Release D: Caddie plays the strategic routing. This is the ONE place the
+    // flag is set, so the UI and `verifyCaddieRound` can never disagree about
+    // what hole a seed means — the same reason the length band is drawn here
+    // and not at either call site.
+    strategic: true,
+  });
 }
 
 // --- codec -------------------------------------------------------------------

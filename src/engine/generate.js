@@ -11,6 +11,7 @@ import {
 import { makeCourse, inBounds, cellAt, setCell, dist } from './course.js';
 import { buildRelief } from './relief.js';
 import { applyGreenComplex } from './greens.js';
+import { applyStrategicPlan } from './strategic.js';
 
 export const GEN_VERSION = 1;
 
@@ -24,12 +25,15 @@ export const BIOMES = ['classic', 'winter', 'alpine', 'links'];
 /**
  * @param {number} seed
  * @param {string} [biome]
- * @param {{holeDistTiles?: number, legacyGreen?: boolean}} [opts]
+ * @param {{holeDistTiles?: number, legacyGreen?: boolean, strategic?: boolean}} [opts]
  *   `holeDistTiles` is the hole-length override (used by Caddie's par-3/4/5
  *   holes); omitting it reproduces the classic full-span routing byte-for-byte —
  *   draws happen in the same stream order. `legacyGreen` keeps the pre-release-C
  *   2.5-tile disc instead of a shaped green complex: the arcade's certified
  *   puzzles ask for it so already-shared holes play exactly as recorded.
+ *   `strategic` runs release D's routing pass — the landing-zone hazard moves
+ *   onto the pin side, the corridor widens asymmetrically, a template is
+ *   chosen. Opt-in, so a course without it is byte-identical to release C's.
  * @returns {import('./course.js').Course}
  */
 export function generateCourse(seed, biome = 'classic', opts = null) {
@@ -136,6 +140,13 @@ export function generateCourse(seed, biome = 'classic', opts = null) {
   else if (biome === 'alpine') addSlopes(course);
   else if (biome === 'links') makeLinks(course);
 
+  // The strategy, if asked for: release D's routing pass. It runs on the
+  // finished classic layout and BEFORE the land and the green, because the
+  // height field should be shaped against the ground the player actually plays
+  // and the green wants the template's opinion. Opt-in — a course without the
+  // flag never enters this branch, so release C's seeds are untouched.
+  const strategy = opts?.strategic ? applyStrategicPlan(course, seed, { spine, controls }) : null;
+
   // The land: relief draws from its OWN named substream and only ever reads the
   // finished tile layout, so the height field of every classic seed is
   // byte-identical to release B's — the regression contract, pinned in
@@ -149,7 +160,16 @@ export function generateCourse(seed, biome = 'classic', opts = null) {
   // only the ground of the complex itself. `legacyGreen` keeps the disc: the
   // arcade's certified puzzles (puzzle.js) take that path, which is why
   // golden.test.js stays byte-identical.
-  if (!opts?.legacyGreen) applyGreenComplex(course, seed, { spine });
+  if (!opts?.legacyGreen) {
+    applyGreenComplex(course, seed, {
+      spine,
+      // What crosses the strategic seam is a REQUEST, never terrain: the
+      // archetype the template wants, and the flank the cup should sit on so
+      // that hugging the landing-zone hazard is what opens the angle.
+      prefer: strategy?.greenPrefer ?? null,
+      tuck: strategy ? { x: strategy.perp.x * strategy.tuckSide, y: strategy.perp.y * strategy.tuckSide } : null,
+    });
+  }
 
   return course;
 }

@@ -215,15 +215,21 @@ function insideShape(s, u, v, penScale = 1) {
  *
  * @param {import('./course.js').Course} course a finished, relieved course
  * @param {number} [seed]
- * @param {{spine?: Array<{x:number,y:number}>}} [opts] the routing spine, so the
- *   ground route in can be protected tile-for-tile
+ * @param {{spine?: Array<{x:number,y:number}>, prefer?: string|null,
+ *          tuck?: {x:number,y:number}|null}} [opts]
+ *   `spine` is the routing spine, so the ground route in can be protected
+ *   tile-for-tile. `prefer` and `tuck` are release D's two requests across the
+ *   strategic seam: an archetype the template would like, and the flank the cup
+ *   should be tucked on. Both are PREFERENCES — a plan that cannot honour one
+ *   and still certify simply doesn't, and the reroll picks freely.
  * @returns {GreenPlan}
  */
 export function applyGreenComplex(course, seed = course.seed, opts = {}) {
   const spine = opts.spine ?? [];
+  const ask = { prefer: opts.prefer ?? null, tuck: opts.tuck ?? null };
   const rejected = [];
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const plan = planGreen(course, seed, attempt, spine);
+    const plan = planGreen(course, seed, attempt, spine, ask);
     if (plan.certified.ok) {
       plan.certified.rejected = rejected;
       commit(course, plan);
@@ -234,7 +240,7 @@ export function applyGreenComplex(course, seed = course.seed, opts = {}) {
   // The floor: a plain graded round green with no hazard plan. It is still a
   // GRADED green — pad, pin zones and all — so it certifies where the raw
   // hillside would not. Across the seed space it is not expected to be reached.
-  const plan = planGreen(course, seed, -1, spine);
+  const plan = planGreen(course, seed, -1, spine, ask);
   plan.certified.rejected = rejected;
   commit(course, plan);
   return plan;
@@ -276,7 +282,7 @@ function publicPlan(p) {
  * so a reroll is a different green rather than a different course; `attempt`
  * of -1 is the plain-green fallback.
  */
-function planGreen(course, seed, attempt, spine) {
+function planGreen(course, seed, attempt, spine, ask = { prefer: null, tuck: null }) {
   const H = course.hole;
   const T = course.tee;
   const fallback = attempt < 0;
@@ -301,10 +307,18 @@ function planGreen(course, seed, attempt, spine) {
   const areaBand = { small: [11, 16], medium: [16, 24], large: [24, 33] }[sizeClass];
   let areaTiles = areaBand[0] + rng() * (areaBand[1] - areaBand[0]);
 
-  const archetype = fallback ? 'round' : pickWeighted(rng, [
+  // The archetype table, with the template's request folded in as a WEIGHT.
+  // A Redan asks for a long-narrow green and usually gets one; it never gets a
+  // guarantee, because the first attempt that certifies wins and a hillside
+  // that cannot hold a Redan should not be made to.
+  const baseTable = [
     ['round', 20], ['kidney', 15], ['boomerang', 9], ['long-narrow', 13],
     ['tiered', 16], ['punchbowl', 10], ['crowned', 10], ['island', 7],
-  ]);
+  ];
+  const table = ask.prefer && attempt < 3
+    ? baseTable.map(([a, w]) => [a, a === ask.prefer ? w * 9 : w])
+    : baseTable;
+  const archetype = fallback ? 'round' : pickWeighted(rng, table);
 
   // A shelf needs a green long enough to have two flat halves and a step
   // between them; on a 15-tile green the transition IS the green.
@@ -326,7 +340,17 @@ function planGreen(course, seed, attempt, spine) {
   // pulled back, halving, until the cup has a full tile of green all round it.
   // Deterministic: still one draw, resolved rather than searched.
   const offU0 = fallback ? 0 : (rng() * 2 - 1) * shape.a * 0.32;
-  const offV0 = fallback ? 0 : (rng() * 2 - 1) * shape.b * 0.32;
+  let offV0 = fallback ? 0 : (rng() * 2 - 1) * shape.b * 0.32;
+  // The tuck request. `offV` displaces the green's CENTRE against the cup along
+  // the local v-axis, which in world space is (-sin θ, cos θ) — so putting the
+  // cup on a given flank is a question about the SIGN of offV, and the draw
+  // above is kept intact (same stream, same magnitude class) with only its
+  // sign resolved and a floor under it. A cup on the flank the landing-zone
+  // hazard guards is what makes hugging that hazard worth anything.
+  if (ask.tuck && !fallback) {
+    const want = Math.sign(-st * ask.tuck.x + ct * ask.tuck.y);
+    if (want !== 0) offV0 = want * Math.max(Math.abs(offV0), shape.b * 0.20);
+  }
   const reach = Math.ceil(Math.max(shape.a, shape.b) * (1 + shape.lobeAmp)) + 1;
 
   let center = null;
