@@ -113,6 +113,57 @@ export function frameRect(rect, view) {
   return { scale: Math.max(min, Math.min(max, fit)), cx, cy };
 }
 
+/** The bbox of two world points — a ball→pin corridor. frameRect pads and
+ *  centers it; keeping the bbox its own function keeps the rule testable. */
+export function corridorRect(a, b) {
+  return {
+    x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y),
+    x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y),
+  };
+}
+
+/**
+ * Zoom about a SCREEN point: the world point under (sx, sy) stays exactly
+ * under (sx, sy) while the scale changes by `factor`, clamped to [min, max].
+ * A clamped-away factor is a perfect no-op (the returned camera equals `cam`),
+ * so a wheel spun into the stop never drifts the view.
+ */
+export function zoomAbout(cam, sx, sy, factor, view, opts = {}) {
+  const tile = view.tile ?? 24;
+  const min = opts.min ?? 0.25;
+  const max = opts.max ?? 12;
+  const scale = Math.max(min, Math.min(max, cam.scale * factor));
+  const p = screenToWorld(sx, sy, cam, view); // what the pointer is holding
+  const r = rot((p.x + 0.5) * tile, (p.y + 0.5) * tile, view);
+  // solve worldToScreen(p, next) === (sx, sy) for the new center
+  const { u, v } = unrot(
+    r.x - (sx - view.w / 2) / scale,
+    r.y - (sy - view.h / 2) / scale,
+    view
+  );
+  return { scale, cx: u / tile - 0.5, cy: v / tile - 0.5 };
+}
+
+/** Pan by a SCREEN-pixel delta: the world slides with the finger, so the point
+ *  under it stays under it. Scale is untouched. */
+export function panBy(cam, dx, dy, view) {
+  const tile = view.tile ?? 24;
+  const c = rot((cam.cx + 0.5) * tile, (cam.cy + 0.5) * tile, view);
+  const { u, v } = unrot(c.x - dx / cam.scale, c.y - dy / cam.scale, view);
+  return { scale: cam.scale, cx: u / tile - 0.5, cy: v / tile - 0.5 };
+}
+
+/** Keep a camera center within reach of the board, so a pan can never strand
+ *  the player on empty background. */
+export function clampCenter(cam, bounds) {
+  const m = bounds.margin ?? 2;
+  return {
+    scale: cam.scale,
+    cx: Math.max(-m, Math.min(bounds.width - 1 + m, cam.cx)),
+    cy: Math.max(-m, Math.min(bounds.height - 1 + m, cam.cy)),
+  };
+}
+
 export const easeOutCubic = (t) => 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 
 /** Blend two cameras. t is already eased. */

@@ -18,6 +18,7 @@ import {
 import {
   makeCamera, worldToScreen, screenToWorld, worldTransform, courseCamera,
   frameRect, easeOutCubic, lerpCamera, sameCamera,
+  corridorRect, zoomAbout, panBy, clampCenter,
 } from './camera.js';
 import { setHeartbeat, stopHeartbeat } from './sound.js';
 import { copy } from './copy.js';
@@ -90,13 +91,30 @@ let hadWater = false; // for the haptic tick on risk transitions
 // At scale 1 centered on the board the transform is the identity it always
 // was, so the course view is pixel-for-pixel unchanged. Math: ui/camera.js.
 let camera = makeCamera();
-let camMode = 'course'; // 'course' | 'green' — what the camera is framing
+let camMode = 'course'; // 'course' | 'approach' | 'green' — what it is framing
 let camAnim = null; // {from, to, t0, dur} while easing between framings
 let camRaf = 0;
 let camPending = null; // a transition that arrived mid-drag, owed at pointerup
 let greenRect = null; // this hole's green bbox + centroid, computed once
+let approachRect = null; // the ball→pin corridor, re-derived on every new lie
+// The player's own camera, on top of the automatic framing: pinch/wheel zoom
+// and two-finger pan write here. It outlives a resize or a rotate (the numbers
+// are world tiles, not pixels) and is cleared by the next phase change or by
+// Recenter — so the game always gets the last word about what a NEW lie shows.
+let manualCam = null;
+// The overview peek: hold it and the whole hole is back, whatever the framing.
+// It is a display state only — camMode still remembers what we peeked out of.
+let peeking = false;
 const CAM_MS = 700;
+const PEEK_MS = 300; // the peek is a glance, not a cinematic move
 const GREEN_PAD = 2; // tiles of fringe to keep around the green
+const APPROACH_PAD = 2.5; // tiles of room around the ball→pin corridor
+const APPROACH_TILES = 5; // <= 5 tiles (80 yds) to the pin is an approach
+const ZOOM_MIN_MUL = 0.75; // how far under the framing scale a pinch may go
+const ZOOM_MAX_MUL = 6; // …and how far over it
+const ZOOM_FLOOR = 1; // never below the course view
+const ZOOM_CEIL = 8; // …nor past legibility
+const PEEK_PINCH = 0.62; // pinch out to 62% of the start = "show me the hole"
 
 const camView = () => ({ w: canvas.width, h: canvas.height, tile: TILE, rotated });
 
@@ -203,8 +221,49 @@ function desiredCamera(mode) {
   if (mode === 'green' && greenRect) {
     return frameRect(greenRect, { ...view, ...visibleCanvasPx(), pad: GREEN_PAD, min: 1, max: 6 });
   }
+  if (mode === 'approach' && approachRect) {
+    return frameRect(approachRect, { ...view, ...visibleCanvasPx(), pad: APPROACH_PAD, min: 1, max: 4 });
+  }
   return courseCamera(view);
 }
+
+/** The framing this LIE earns, and the corridor it needs. Called on every new
+ *  lie and nowhere else — the same rule wave 1 set: phase changes only.
+ *  Putting always wins; inside 80 yards the ball→pin corridor is the story;
+ *  anything longer is still a whole-hole decision, so stay wide. */
+function lieCamMode() {
+  approachRect = null;
+  if (putting) return 'green';
+  if (!course || !ball) return 'course';
+  if (toPin(ball) > APPROACH_TILES) return 'course';
+  approachRect = corridorRect(ball, course.hole);
+  return 'approach';
+}
+
+/** What the camera should be RIGHT NOW: a peek beats everything, the player's
+ *  own zoom beats the automatic framing, and the framing is the floor. */
+function activeCamera() {
+  if (peeking) return courseCamera(camView());
+  if (manualCam) return manualCam;
+  return desiredCamera(camMode);
+}
+
+/** The automatic framing's scale — what a manual zoom is measured against. */
+const frameScale = () => desiredCamera(camMode).scale;
+
+/** How far the player may zoom from here: a window around the framing scale,
+ *  never below the course view and never past legibility. The floor also gives
+ *  way to where the camera already IS — peeked all the way out to scale 1, a
+ *  wheel must zoom from there instead of snapping up to the framing's floor. */
+function zoomBounds() {
+  const base = frameScale();
+  return {
+    min: Math.max(ZOOM_FLOOR, Math.min(base * ZOOM_MIN_MUL, camera.scale)),
+    max: Math.min(ZOOM_CEIL, base * ZOOM_MAX_MUL),
+  };
+}
+
+const camBounds = () => ({ width: course?.width ?? 40, height: course?.height ?? 24, margin: 2 });
 
 function cancelCamAnim() {
   if (camRaf) cancelAnimationFrame(camRaf);
@@ -226,10 +285,10 @@ function camTick() {
   refresh();
 }
 
-/** Ease the camera to a framing. Reduced motion snaps. */
-function applyCam(mode, { instant = false } = {}) {
-  camMode = mode;
-  const to = desiredCamera(mode);
+/** Ease the camera to whatever it should be right now (peek, manual zoom, or
+ *  the automatic framing). Reduced motion snaps. */
+function settleCam({ instant = false, dur = CAM_MS } = {}) {
+  const to = activeCamera();
   if (sameCamera(to, camera)) { cancelCamAnim(); camera = to; return; }
   if (instant || reducedMotion.matches) {
     cancelCamAnim();
@@ -238,8 +297,19 @@ function applyCam(mode, { instant = false } = {}) {
     return;
   }
   cancelCamAnim();
-  camAnim = { from: { ...camera }, to, t0: performance.now(), dur: CAM_MS };
+  camAnim = { from: { ...camera }, to, t0: performance.now(), dur };
   camRaf = requestAnimationFrame(camTick);
+}
+
+/** Ease the camera to a framing. A phase change is the game taking the wheel
+ *  back: the new lie gets to show itself, so a peek and any zoom the player
+ *  set are both retired here. */
+function applyCam(mode, opts = {}) {
+  camMode = mode;
+  manualCam = null;
+  peeking = false;
+  syncPeekBtn();
+  settleCam(opts);
 }
 
 /** The camera only ever moves on a PHASE CHANGE — entering the putt loop, a
@@ -252,6 +322,51 @@ function requestCam(mode, opts = {}) {
     return;
   }
   applyCam(mode, opts);
+}
+
+// --- player camera controls: peek, zoom, pan, recenter ---------------------
+// All four write through activeCamera(), so they ride the SAME seam the game's
+// own framings do: aiming, drawing and the DOM stamp follow for free.
+
+const peekBtn = document.getElementById('peek');
+
+function syncPeekBtn() {
+  peekBtn?.classList.toggle('active', peeking);
+  peekBtn?.setAttribute('aria-pressed', String(peeking));
+}
+
+/** The overview peek: the whole hole, held or toggled, over any framing. */
+function setPeek(on) {
+  if (peeking === on) return;
+  peeking = on;
+  // a relative touch drag measures its delta in the OLD camera — end it rather
+  // than let the target jump when the framing changes underneath it
+  dragStart = null;
+  syncPeekBtn();
+  settleCam({ dur: PEEK_MS });
+  if (course && phase !== 'loading') refresh();
+}
+
+/** Back to the framing the game chose for this lie. */
+function recenter() {
+  peeking = false;
+  manualCam = null;
+  syncPeekBtn();
+  settleCam({ dur: PEEK_MS });
+  if (course && phase !== 'loading') refresh();
+}
+
+/** Zoom about a canvas-pixel point, clamped to the window around the framing.
+ *  A deliberate zoom is the player taking the wheel, so it ends the peek. */
+function zoomAt(sx, sy, factor) {
+  if (!course || phase === 'loading') return;
+  const from = peeking ? courseCamera(camView()) : camera;
+  peeking = false;
+  syncPeekBtn();
+  cancelCamAnim();
+  manualCam = clampCenter(zoomAbout(from, sx, sy, factor, camView(), zoomBounds()), camBounds());
+  camera = manualCam;
+  refresh();
 }
 
 // --- risk-reactive ambience: the vignette layer tints toward alarm as the
@@ -432,8 +547,9 @@ function loadHole() {
     puttPos = null;
     puttCount = 0;
     holedOut = false;
-    // a fresh hole opens on the course view — new art, so nothing to ease from
-    applyCam('course', { instant: true });
+    // a fresh hole opens on the framing its tee shot earns — new art, so there
+    // is nothing to ease from. (A short par 3 can open on the corridor.)
+    applyCam(lieCamMode(), { instant: true });
     phase = 'aim';
     const label = round.label ?? (round.daily ? copy.dailyLabel(dailyNumber()) : copy.roundLabel(round.seed));
     meta.textContent = copy.holeMeta({
@@ -473,9 +589,10 @@ function drawBase() {
   canvas.width = (rotated ? course.height : course.width) * TILE;
   canvas.height = (rotated ? course.width : course.height) * TILE;
   fitCanvas();
-  // re-derive the framing for the current size/orientation (a no-op unless the
-  // window changed); an ease in flight owns the camera and is left alone
-  if (!camAnim) camera = desiredCamera(camMode);
+  // re-derive what the camera should be for the current size/orientation (a
+  // no-op unless the window changed) — peek and the player's own zoom included,
+  // so a rotate keeps both. An ease in flight owns the camera and is left alone.
+  if (!camAnim) camera = activeCamera();
   beginWorld();
   ctx.drawImage(art, 0, 0);
   // the green complex rides on top of the course art, in the same world pixels,
@@ -725,12 +842,18 @@ function updatePuttReadout() {
   setHeartbeat(Math.min(1, stats.threePct / 50));
 }
 
-function eventCoursePoint(e) {
+/** A pointer event in canvas-bitmap pixels — the space the camera seam speaks. */
+function eventCanvasPx(e) {
   const r = canvas.getBoundingClientRect();
-  return fromScreenPx(
-    (e.clientX - r.left) * (canvas.width / r.width),
-    (e.clientY - r.top) * (canvas.height / r.height)
-  );
+  return {
+    x: (e.clientX - r.left) * (canvas.width / r.width),
+    y: (e.clientY - r.top) * (canvas.height / r.height),
+  };
+}
+
+function eventCoursePoint(e) {
+  const p = eventCanvasPx(e);
+  return fromScreenPx(p.x, p.y);
 }
 
 /** Touch users get a sensible starting target to nudge from. */
@@ -742,7 +865,92 @@ function initNeutralAim() {
   setAim({ x: ball.x + (course.hole.x - ball.x) * f, y: ball.y + (course.hole.y - ball.y) * f });
 }
 
+// --- touch: ONE finger aims (wave 1, untouched), TWO drive the camera -------
+// The second finger landing ends the aim drag and opens a gesture; the gesture
+// only ever writes manualCam / peeking, never aimTarget. So a pinch can never
+// move the target, and the target is exactly where the finger left it after.
+const touches = new Map(); // live touch pointers, in canvas pixels
+let gesture = null; // {d0, mid0, cam0, peeked}
+let gestureLock = false; // a leftover finger must lift before it may aim again
+
+function gestureStart() {
+  const pts = [...touches.values()];
+  if (pts.length < 2) return;
+  dragStart = null; // the aim drag is over; the target stays put
+  tap = null; // a second finger is not half a double-tap
+  gestureLock = true;
+  gesture = {
+    d0: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+    mid0: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+    cam0: { ...camera },
+    peeked: peeking,
+  };
+  cancelCamAnim();
+}
+
+function gestureMove() {
+  const pts = [...touches.values()];
+  if (!gesture || pts.length < 2 || !course || phase === 'loading') return;
+  const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+  const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  const ratio = d / gesture.d0;
+  // pinch OUT past the threshold: "show me the whole hole"
+  if (!gesture.peeked && ratio < PEEK_PINCH && frameScale() > 1.05) {
+    gesture.peeked = true;
+    manualCam = null;
+    setPeek(true);
+    return;
+  }
+  // pinch IN out of a peek: back to the framing and keep zooming from there.
+  // Fingers are on the glass, so this SNAPS — no ease may run under them.
+  if (gesture.peeked && ratio > 1 / PEEK_PINCH) {
+    peeking = false;
+    syncPeekBtn();
+    cancelCamAnim();
+    camera = activeCamera();
+    gesture = { d0: d, mid0: mid, cam0: { ...camera }, peeked: false };
+    refresh();
+    return;
+  }
+  if (gesture.peeked) return;
+  const view = camView();
+  const zoomed = zoomAbout(gesture.cam0, gesture.mid0.x, gesture.mid0.y, ratio, view, zoomBounds());
+  const panned = panBy(zoomed, mid.x - gesture.mid0.x, mid.y - gesture.mid0.y, view);
+  cancelCamAnim();
+  manualCam = clampCenter(panned, camBounds());
+  camera = manualCam;
+  refresh();
+}
+
+function endTouch(id) {
+  touches.delete(id);
+  if (gesture && touches.size < 2) gesture = null;
+  if (touches.size === 0) gestureLock = false;
+}
+
+// Double-tap anywhere on the glass recenters — the fastest way back. A tap is
+// resolved on RELEASE (short, still, one finger), so a pinch's first finger and
+// an aim drag can never be mistaken for half of one.
+const TAP_MS = 300; // longer than this is a drag, not a tap
+const TAP_SLOP = 14; // canvas px a tap may wander
+const DOUBLE_MS = 320;
+let tap = null; // {t, x, y, id} the single-finger tap in progress
+let lastTap = 0;
+let lastTapPt = null;
+
 canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)) {
+    touches.set(e.pointerId, eventCanvasPx(e));
+    if (tap && tap.id === e.pointerId) {
+      const p = touches.get(e.pointerId);
+      if (Math.hypot(p.x - tap.x, p.y - tap.y) > TAP_SLOP) tap = null;
+    }
+    if (gesture) {
+      e.preventDefault();
+      gestureMove();
+      return;
+    }
+  }
   if (phase !== 'aim') return;
   if (e.pointerType === 'touch') {
     // relative drag: the target moves with your finger's delta, so the
@@ -765,11 +973,19 @@ canvas.addEventListener('pointerdown', (e) => {
     touchMode = true;
     document.body.classList.add('touch');
   }
+  touches.set(e.pointerId, eventCanvasPx(e));
+  if (touches.size >= 2) {
+    e.preventDefault();
+    gestureStart();
+    return;
+  }
+  const at = touches.get(e.pointerId);
+  tap = { t: performance.now(), x: at.x, y: at.y, id: e.pointerId };
   if (phase === 'reveal') {
     advance();
     return;
   }
-  if (phase !== 'aim') return;
+  if (phase !== 'aim' || gestureLock) return;
   e.preventDefault();
   if (!aimTarget) initNeutralAim();
   dragStart = { at: eventCoursePoint(e), t0: { ...aimTarget } };
@@ -779,15 +995,75 @@ canvas.addEventListener('pointerdown', (e) => {
     // synthetic/expired pointers can't be captured; dragging still works
   }
 });
-window.addEventListener('pointerup', () => {
+function releasePointer(e) {
+  if (e && (e.pointerType === 'touch' || touches.has(e.pointerId))) endTouch(e.pointerId);
   dragStart = null;
+  // a completed single-finger tap: the second one within DOUBLE_MS recenters
+  if (tap && e && tap.id === e.pointerId) {
+    const now = performance.now();
+    const quick = now - tap.t < TAP_MS;
+    const near = lastTapPt && Math.hypot(tap.x - lastTapPt.x, tap.y - lastTapPt.y) < 60;
+    if (quick && lastTap && now - lastTap < DOUBLE_MS && near) {
+      lastTap = 0;
+      lastTapPt = null;
+      recenter();
+    } else if (quick) {
+      lastTap = now;
+      lastTapPt = { x: tap.x, y: tap.y };
+    }
+    tap = null;
+  }
   // a framing that came due mid-drag runs now that the finger is off the glass
   if (camPending) {
     const p = camPending;
     camPending = null;
     applyCam(p.mode, p.opts);
   }
+}
+window.addEventListener('pointerup', releasePointer);
+window.addEventListener('pointercancel', releasePointer);
+
+// --- desktop: wheel / trackpad pinch zooms about the cursor ----------------
+// passive:false so the page can never scroll out from under the cockpit.
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  if (!course || phase === 'loading') return;
+  // a trackpad pinch arrives as ctrl+wheel, an order of magnitude finer
+  const lines = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  const k = e.ctrlKey ? 0.01 : 0.0022;
+  const p = eventCanvasPx(e);
+  zoomAt(p.x, p.y, Math.exp(-Math.max(-160, Math.min(160, e.deltaY * lines)) * k));
+}, { passive: false });
+
+// --- keyboard: O peeks at the whole hole, R recenters ----------------------
+// O is hold-OR-tap: press and hold to glance at the hole and have it snap back
+// when you let go; tap it and the overview stays until you tap it again.
+const PEEK_TAP_MS = 260;
+let peekDownAt = 0;
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+  const k = e.key.toLowerCase();
+  if (k === 'o') {
+    e.preventDefault();
+    peekDownAt = performance.now();
+    setPeek(!peeking);
+  } else if (k === 'r') {
+    e.preventDefault();
+    recenter();
+  }
 });
+window.addEventListener('keyup', (e) => {
+  if (e.key.toLowerCase() !== 'o') return;
+  if (peekDownAt && performance.now() - peekDownAt > PEEK_TAP_MS && peeking) setPeek(false);
+  peekDownAt = 0;
+});
+// a lost keyup (tabbing away mid-hold) must not make the next one misfire;
+// the overview stays visible and O or Recenter still puts it back
+window.addEventListener('blur', () => { peekDownAt = 0; });
+
+peekBtn?.addEventListener('click', () => setPeek(!peeking));
+document.getElementById('recenter')?.addEventListener('click', recenter);
 
 canvas.addEventListener('click', () => {
   if (touchMode) return; // touch commits via the Hit button; taps advance reveals
@@ -1054,7 +1330,6 @@ function advance() {
     return finishHole();
   }
   if (isHoleOver(course, ball)) return beginPutting(); // on the green: putt for real
-  const rolledOff = putting;
   if (putting) {
     // the putt rolled off the green — back to a real lie and a real swing
     putting = false;
@@ -1064,7 +1339,10 @@ function advance() {
   phase = 'aim';
   aimTarget = null;
   reveal = null;
-  if (rolledOff) requestCam('course'); // full swing again: pull back out
+  // a new lie earns a fresh framing: the corridor to the pin when the shot is
+  // an approach, the whole hole when it is not. Never mid-decision, never
+  // mid-drag — requestCam owes it to the finger lifting.
+  requestCam(lieCamMode());
   verdict.textContent = copy.nextShot(strokes + 1, yards(toPin(ball)));
   document.getElementById('pattern').textContent = '';
   if (touchMode) initNeutralAim();
@@ -1251,6 +1529,10 @@ window.__caddie = {
   get state() {
     return { phase, ball, strokes, decisions, round, course, putting, puttPos, puttCount, holedOut,
       aimTarget, camera: { ...camera }, camMode, rotated, camAnimating: Boolean(camAnim),
+      // the player's own camera layer: peeking at the whole hole, or zoomed
+      peeking, manualZoom: manualCam ? { ...manualCam } : null,
+      frameScale: +frameScale().toFixed(4), zoomBounds: zoomBounds(),
+      approachRect: approachRect ? { ...approachRect } : null,
       // the green complex: whether it exists, what it cost, how often it drew
       greenArt: greenArt
         ? { w: greenArt.w, h: greenArt.h, sub: greenArt.sub, sloped: greenArt.sloped,
@@ -1260,6 +1542,10 @@ window.__caddie = {
   },
   aimAt(x, y) { aimTarget = { x, y }; commitDecision(); },
   advance,
+  // camera controls, the same entry points the buttons and keys use
+  peek(on) { setPeek(Boolean(on)); },
+  recenter,
+  zoomAt,
   /** Test hook: repaint both art layers for the course as it stands now. Lets a
    *  harness stamp a different biome's cells onto the live hole and see the art
    *  that terrain earns. Never called by the game itself. */
