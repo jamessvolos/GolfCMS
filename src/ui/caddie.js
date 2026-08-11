@@ -13,6 +13,10 @@ import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
 import { yards, feet, holeYards, parForTiles, clubName } from '../engine/yards.js';
 import { renderCourseArt, drawFlag, drawBall, TILE } from './paint.js';
+import {
+  makeCamera, worldToScreen, screenToWorld, worldTransform, courseCamera,
+  frameRect, easeOutCubic, lerpCamera, sameCamera,
+} from './camera.js';
 import { setHeartbeat, stopHeartbeat } from './sound.js';
 import { copy } from './copy.js';
 
@@ -70,21 +74,35 @@ let dragStart = null; // {sx, sy, t0} during a touch drag
 let rotated = false; // portrait: course drawn tee-at-bottom, green-at-top
 let hadWater = false; // for the haptic tick on risk transitions
 
+// --- the world camera: {scale, cx, cy}, cx/cy being the world tile sitting at
+// the center of the canvas. It is threaded through toScreen / fromScreenPx /
+// beginWorld and NOWHERE else — those three are the whole world↔screen seam,
+// so drawing, pointer input and the DOM stamp all zoom together for free.
+// At scale 1 centered on the board the transform is the identity it always
+// was, so the course view is pixel-for-pixel unchanged. Math: ui/camera.js.
+let camera = makeCamera();
+let camMode = 'course'; // 'course' | 'green' — what the camera is framing
+let camAnim = null; // {from, to, t0, dur} while easing between framings
+let camRaf = 0;
+let camPending = null; // a transition that arrived mid-drag, owed at pointerup
+let greenRect = null; // this hole's green bbox + centroid, computed once
+const CAM_MS = 700;
+const GREEN_PAD = 2; // tiles of fringe to keep around the green
+
+const camView = () => ({ w: canvas.width, h: canvas.height, tile: TILE, rotated });
+
 function toScreen(p) {
-  return rotated
-    ? { x: (p.y + 0.5) * TILE, y: canvas.height - (p.x + 0.5) * TILE }
-    : { x: (p.x + 0.5) * TILE, y: (p.y + 0.5) * TILE };
+  return worldToScreen(p, camera, camView());
 }
 function fromScreenPx(sx, sy) {
-  return rotated
-    ? { x: (canvas.height - sy) / TILE - 0.5, y: sx / TILE - 0.5 }
-    : { x: sx / TILE - 0.5, y: sy / TILE - 0.5 };
+  return screenToWorld(sx, sy, camera, camView());
 }
 function beginWorld() {
   ctx.save();
-  if (rotated) {
-    ctx.translate(0, canvas.height);
-    ctx.rotate(-Math.PI / 2);
+  for (const s of worldTransform(camera, camView())) {
+    if (s.t === 'translate') ctx.translate(s.x, s.y);
+    else if (s.t === 'scale') ctx.scale(s.k, s.k);
+    else ctx.rotate(s.a);
   }
 }
 
@@ -114,6 +132,89 @@ function canvasToViewport(px) {
   };
 }
 
+/** The slice of the canvas bitmap the viewport actually shows. Cover-fit
+ *  crops the rest, so this — not the full bitmap — is what must fit a frame. */
+function visibleCanvasPx() {
+  const vw = window.innerWidth || 1;
+  const vh = window.innerHeight || 1;
+  const s = Math.max(vw / canvas.width, vh / canvas.height);
+  return { viewW: vw / s, viewH: vh / s };
+}
+
+/** The green's bounding box and centroid, in world tiles. Computed once per
+ *  hole — the auto-frame consults it on every resize. */
+function findGreenRect() {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let sx = 0, sy = 0, n = 0;
+  for (let y = 0; y < course.height; y++) {
+    for (let x = 0; x < course.width; x++) {
+      if (cellAt(course, x, y) !== GREEN) continue;
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      sx += x; sy += y; n += 1;
+    }
+  }
+  return n ? { x0, y0, x1, y1, cx: sx / n, cy: sy / n } : null;
+}
+
+/** What the camera SHOULD be for a framing, at the current size/orientation.
+ *  Pure and cheap, so a resize or a rotate just re-derives it. */
+function desiredCamera(mode) {
+  const view = camView();
+  if (mode === 'green' && greenRect) {
+    return frameRect(greenRect, { ...view, ...visibleCanvasPx(), pad: GREEN_PAD, min: 1, max: 6 });
+  }
+  return courseCamera(view);
+}
+
+function cancelCamAnim() {
+  if (camRaf) cancelAnimationFrame(camRaf);
+  camRaf = 0;
+  camAnim = null;
+}
+
+function camTick() {
+  camRaf = 0;
+  if (!camAnim) return;
+  const t = (performance.now() - camAnim.t0) / camAnim.dur;
+  camera = lerpCamera(camAnim.from, camAnim.to, easeOutCubic(t));
+  if (t >= 1) {
+    camera = camAnim.to;
+    camAnim = null;
+  } else {
+    camRaf = requestAnimationFrame(camTick);
+  }
+  refresh();
+}
+
+/** Ease the camera to a framing. Reduced motion snaps. */
+function applyCam(mode, { instant = false } = {}) {
+  camMode = mode;
+  const to = desiredCamera(mode);
+  if (sameCamera(to, camera)) { cancelCamAnim(); camera = to; return; }
+  if (instant || reducedMotion.matches) {
+    cancelCamAnim();
+    camera = to;
+    if (course && phase !== 'loading') refresh();
+    return;
+  }
+  cancelCamAnim();
+  camAnim = { from: { ...camera }, to, t0: performance.now(), dur: CAM_MS };
+  camRaf = requestAnimationFrame(camTick);
+}
+
+/** The camera only ever moves on a PHASE CHANGE — entering the putt loop, a
+ *  hole ending, a hole loading. Every call site clears aimTarget first, so a
+ *  live decision is never re-framed under the player. A request that lands
+ *  mid-drag is owed until the finger lifts. */
+function requestCam(mode, opts = {}) {
+  if (dragStart) {
+    camPending = { mode, opts };
+    return;
+  }
+  applyCam(mode, opts);
+}
+
 // --- risk-reactive ambience: the vignette layer tints toward alarm as the
 // aimed pattern flirts with water/OB, sand, and trees ---
 function setDanger(pct) {
@@ -138,6 +239,9 @@ const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)') ??
 
 function startPushIn(target) {
   if (reducedMotion.matches || !wrapEl) return;
+  // on the green the world camera already frames the ball — a CSS zoom on top
+  // would double-apply, so push-in stays a full-swing flourish only
+  if (putting) return;
   const p = canvasToViewport(toScreen(target));
   wrapEl.style.transformOrigin = `${p.x.toFixed(1)}px ${p.y.toFixed(1)}px`;
   wrapEl.classList.add('push-in');
@@ -199,7 +303,8 @@ function drawFlight() {
     x: fx.from.x + (fx.to.x - fx.from.x) * t,
     y: fx.from.y + (fx.to.y - fx.from.y) * t,
   });
-  const distPx = Math.hypot(fx.to.x - fx.from.x, fx.to.y - fx.from.y) * TILE;
+  // the arc is a screen-space lift, so it tracks the camera's zoom
+  const distPx = Math.hypot(fx.to.x - fx.from.x, fx.to.y - fx.from.y) * TILE * camera.scale;
   const lift = fx.putt ? 0 : Math.min(90, 18 + distPx * 0.16); // putts hug the turf
   const SAMPLES = 14;
   for (let k = SAMPLES; k >= 0; k--) {
@@ -260,6 +365,8 @@ function syncModeSelect() {
 function loadHole() {
   phase = 'loading';
   cancelFx();
+  cancelCamAnim(); // no ease may outlive the course it was framing
+  camPending = null;
   hideStamp();
   clearDanger();
   clearPushIn();
@@ -275,6 +382,7 @@ function loadHole() {
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
     art = renderCourseArt(course);
+    greenRect = findGreenRect();
     ball = { ...course.tee };
     strokes = 0;
     decisions = [];
@@ -284,6 +392,8 @@ function loadHole() {
     puttPos = null;
     puttCount = 0;
     holedOut = false;
+    // a fresh hole opens on the course view — new art, so nothing to ease from
+    applyCam('course', { instant: true });
     phase = 'aim';
     const label = round.label ?? (round.daily ? copy.dailyLabel(dailyNumber()) : copy.roundLabel(round.seed));
     meta.textContent = copy.holeMeta({
@@ -321,6 +431,9 @@ function drawBase() {
   canvas.width = (rotated ? course.height : course.width) * TILE;
   canvas.height = (rotated ? course.width : course.height) * TILE;
   fitCanvas();
+  // re-derive the framing for the current size/orientation (a no-op unless the
+  // window changed); an ease in flight owns the camera and is left alone
+  if (!camAnim) camera = desiredCamera(camMode);
   beginWorld();
   ctx.drawImage(art, 0, 0);
   ctx.restore();
@@ -615,7 +728,15 @@ canvas.addEventListener('pointerdown', (e) => {
     // synthetic/expired pointers can't be captured; dragging still works
   }
 });
-window.addEventListener('pointerup', () => { dragStart = null; });
+window.addEventListener('pointerup', () => {
+  dragStart = null;
+  // a framing that came due mid-drag runs now that the finger is off the glass
+  if (camPending) {
+    const p = camPending;
+    camPending = null;
+    applyCam(p.mode, p.opts);
+  }
+});
 
 canvas.addEventListener('click', () => {
   if (touchMode) return; // touch commits via the Hit button; taps advance reveals
@@ -858,6 +979,8 @@ function beginPutting() {
   phase = 'aim';
   aimTarget = null;
   reveal = null;
+  // the dance floor deserves the room: ease in to the green + its fringe
+  requestCam('green');
   const ft = feet(toPin(puttPos));
   verdict.textContent = puttCount === 0 ? copy.puttFirst(ft) : copy.puttNext(puttCount + 1, ft);
   document.getElementById('pattern').textContent = '';
@@ -878,6 +1001,7 @@ function advance() {
     return finishHole();
   }
   if (isHoleOver(course, ball)) return beginPutting(); // on the green: putt for real
+  const rolledOff = putting;
   if (putting) {
     // the putt rolled off the green — back to a real lie and a real swing
     putting = false;
@@ -887,6 +1011,7 @@ function advance() {
   phase = 'aim';
   aimTarget = null;
   reveal = null;
+  if (rolledOff) requestCam('course'); // full swing again: pull back out
   verdict.textContent = copy.nextShot(strokes + 1, yards(toPin(ball)));
   document.getElementById('pattern').textContent = '';
   if (touchMode) initNeutralAim();
@@ -915,6 +1040,8 @@ function recordDailyStreak() {
 }
 
 function finishHole() {
+  // the hole is done: pull back out to the course view behind the card
+  requestCam('course');
   // bank this hole's decision record for the round submission
   if (recHole) {
     round.rec?.push(recHole);
@@ -1069,7 +1196,8 @@ hcpSel.addEventListener('change', () => {
 // test hooks
 window.__caddie = {
   get state() {
-    return { phase, ball, strokes, decisions, round, course, putting, puttPos, puttCount, holedOut };
+    return { phase, ball, strokes, decisions, round, course, putting, puttPos, puttCount, holedOut,
+      aimTarget, camera: { ...camera }, camMode, rotated, camAnimating: Boolean(camAnim) };
   },
   aimAt(x, y) { aimTarget = { x, y }; commitDecision(); },
   advance,
