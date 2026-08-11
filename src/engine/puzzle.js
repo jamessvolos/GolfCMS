@@ -32,7 +32,12 @@ export const DIFFICULTIES = ['easy', 'standard', 'rude'];
 export function makePuzzle(seed, difficulty = 'standard', biome = 'classic') {
   for (let attempt = 0; attempt < 32; attempt++) {
     const effectiveSeed = (seed + attempt) >>> 0;
-    const course = generateCourse(effectiveSeed, biome);
+    // The arcade's certified puzzles keep the classic disc green. Every hole
+    // ever shared as a seed carries a solver certificate recorded against that
+    // green, and a share code is a promise about a hole, not about a build:
+    // release C's green architecture reaches the arcade only behind a
+    // GEN_VERSION bump. Caddie — the game the release is for — gets it today.
+    const course = generateCourse(effectiveSeed, biome, { legacyGreen: true });
     const start = sampleBallStart(course, difficulty);
     if (!start) continue;
     const solution = solve(course, start);

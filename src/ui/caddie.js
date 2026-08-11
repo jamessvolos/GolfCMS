@@ -595,6 +595,9 @@ function loadHole() {
       n: round.holeIndex + 1, count: round.count,
       par: holeInfo.par, yds: holeInfo.yds,
       arch: course.archetype, wind: windLabel(),
+      // release C: the hole's green complex has a shape and a hole location, and
+      // the caddie says both out loud
+      green: course.green ? copy.greenNote(course.green.archetype, course.pin?.name) : null,
     });
     verdict.textContent = copy.firstAim(yards(toPin(ball)));
     document.getElementById('pattern').textContent = '';

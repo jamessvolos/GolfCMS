@@ -13,8 +13,13 @@ export const copy = {
 
   // ---- status strip ----
   loadingHole: (n, count) => `Hole ${n} of ${count} — reading it now…`,
-  holeMeta: ({ course, label, n, count, par, yds, arch, wind }) =>
-    `${course} · ${label} · Hole ${n} of ${count} · Par ${par} · ${yds} yds · ${arch}${wind}`,
+  holeMeta: ({ course, label, n, count, par, yds, arch, wind, green }) =>
+    `${course} · ${label} · Hole ${n} of ${count} · Par ${par} · ${yds} yds · ${arch}${wind}`
+    + (green ?? ''),
+  /** The green the hole finishes on, the way a caddie hands you the book:
+   *  "· punchbowl green, pin middle bowl". */
+  greenNote: (archetype, pinName) =>
+    ` · ${archetype} green` + (pinName ? `, pin ${pinName}` : ''),
   wind: (mag, dir) => ` · wind ${mag} ${dir}`,
   scoreLine: (shot, pts) => `Shot ${shot} · ${pts} pts`,
 

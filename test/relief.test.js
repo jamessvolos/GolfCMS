@@ -108,8 +108,15 @@ test('classic seeds keep a byte-identical TILE layout with relief in the codebas
   // already-shared seed. Relief draws from its OWN named substream and only
   // ever READS the finished layout, so the cells array cannot have moved — and
   // these fingerprints, taken from the pre-relief generator, prove it did not.
+  //
+  // Release C added green architecture on the same terms — its own substreams,
+  // after every layout draw — but a SHAPED green is by definition different
+  // tiles from a 2.5-tile disc, so the arcade's own courses (`legacyGreen`, the
+  // path puzzle.js and the creator take) are what these fingerprints pin. The
+  // shaped-green path is pinned tile-for-tile in greens.test.js, which proves
+  // the only cells that ever move are the green complex's own.
   for (const [seed, biome, hash, tx, ty, hx, hy, archetype, wx, wy] of CLASSIC_LAYOUTS) {
-    const c = generateCourse(seed, biome);
+    const c = generateCourse(seed, biome, { legacyGreen: true });
     assert.equal(layoutHash(c.cells), hash, `seed ${seed} ${biome}: tile layout byte-identical`);
     assert.deepEqual(c.tee, { x: tx, y: ty }, `seed ${seed} ${biome}: tee`);
     assert.deepEqual(c.hole, { x: hx, y: hy }, `seed ${seed} ${biome}: hole`);
@@ -124,7 +131,7 @@ test('classic seeds keep a byte-identical TILE layout with relief in the codebas
   }
   // the caddie's own length-override path is pinned too
   for (const [seed, holeDistTiles, hash, tx, ty, hx, hy, archetype] of OVERRIDE_LAYOUTS) {
-    const c = generateCourse(seed, 'classic', { holeDistTiles });
+    const c = generateCourse(seed, 'classic', { holeDistTiles, legacyGreen: true });
     assert.equal(layoutHash(c.cells), hash, `seed ${seed} @${holeDistTiles}: tile layout byte-identical`);
     assert.deepEqual(c.tee, { x: tx, y: ty });
     assert.deepEqual(c.hole, { x: hx, y: hy });

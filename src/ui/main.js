@@ -94,7 +94,9 @@ function loadFromHash() {
       // Creator-mode hole: generated base + author's patch, par recomputed.
       try {
         const seed = Number(holeMatch[1]) >>> 0;
-        const course = applyPatch(generateCourse(seed, biome), decodePatch(patchStr));
+        // creator-mode holes are arcade holes: classic disc, like the puzzle path
+        const base = generateCourse(seed, biome, { legacyGreen: true });
+        const course = applyPatch(base, decodePatch(patchStr));
         const solved = solve(course, course.tee);
         startPuzzle({
           seed, difficulty: 'standard', biome, course,
