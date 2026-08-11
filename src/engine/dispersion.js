@@ -12,9 +12,9 @@ export const MAX_CARRY = 15; // tiles (240 yds) — a scratch driver carry
 // Per-lie shot constraints: how far you can hit and how much wider the
 // pattern gets. Trees are a punch-out, sand is an escape.
 export function lieParams(terrain) {
-  if (terrain === SAND) return { maxDist: 7, sigmaScale: 1.8 };
-  if (terrain === ROUGH) return { maxDist: 12, sigmaScale: 1.4 };
-  if (terrain === TREES) return { maxDist: 5, sigmaScale: 1.6 };
+  if (terrain === SAND) return { maxDist: 7, sigmaScale: 2.2 };
+  if (terrain === ROUGH) return { maxDist: 11, sigmaScale: 1.6 };
+  if (terrain === TREES) return { maxDist: 5, sigmaScale: 1.9 };
   return { maxDist: MAX_CARRY, sigmaScale: 1 }; // fairway, green, ice, slopes
 }
 
@@ -40,15 +40,30 @@ export function handicapById(id) {
   return HANDICAPS.find((h) => h.id === id) ?? DEFAULT_PROFILE;
 }
 
+// Dispersion grows SUPERLINEARLY with carry, and that shape is the whole
+// reason a wedge is a scoring club. A linear model pinned to a scratch
+// driver (lateral 1-sigma ~21 yds at 240) implies ~32 ft of lateral error on
+// a 100-yd wedge, i.e. 30+ ft mean proximity — the tour's is 17-18 ft. Tour
+// proximity by carry (≈19 ft at 100 yds, 27 ft at 150, 45 ft at 200, driver
+// ~21 yds lateral at 240) fits a + c·d^p with p ≈ 1.57 far better than any
+// straight line. `LAT_A` is the floor: even a 16-yd pitch scatters ~5 ft.
+const LAT_A = 0.12;
+const LAT_C = 0.0184;
+const LAT_P = 1.565;
+const LONG_A = 0.075;
+const LONG_RATIO = 0.62; // depth error is ~62% of lateral: patterns are wide, not deep
+
 /** Ellipse semi-axes (in tiles) for a shot of the given carry distance. */
 export function sigmas(dist, sigmaScale, profile = DEFAULT_PROFILE) {
   const skill = profile.base + profile.longExtra * (dist / MAX_CARRY);
   // Real dispersion is WIDE, not deep: lateral misses dominate, and distance
   // control is comparatively tight for a known club. Scratch full driver:
-  // lateral 1-sigma ~21 yds, depth 1-sigma ~14 yds.
+  // lateral 1-sigma ~21 yds, depth 1-sigma ~13 yds; scratch 100-yd wedge:
+  // lateral ~6.5 yds, which prices out at ~20 ft mean proximity.
+  const grow = Math.pow(Math.max(dist, 0), LAT_P);
   return {
-    long: (0.2 + dist * 0.042) * sigmaScale * skill, // depth (distance control)
-    lat: (0.22 + dist * 0.075) * sigmaScale * skill, // lateral (the real miss)
+    long: (LONG_A + LONG_RATIO * LAT_C * grow) * sigmaScale * skill, // depth (distance control)
+    lat: (LAT_A + LAT_C * grow) * sigmaScale * skill, // lateral (the real miss)
   };
 }
 
@@ -162,25 +177,192 @@ export function sampleLanding(course, from, target, sigmaScale, strokeIndex, pro
 // wide. Skill scales by sqrt(profile.base): bad ballstrikers aren't equally
 // bad putters. All distances in tiles (1 tile = 16 yds = 48 ft).
 
-export const PUTT_MAX = 20; // tiles — the longest roll the caddie will line up
-// Capture: a roll that passes this close to the cup with holeable pace drops.
-// Tuned against the make-rate contract (3-footers near-automatic, 60-footers
-// roughly one-in-three) rather than physical cup size — this is game scale.
+export const FEET_PER_TILE = 48;
+export const PUTT_MAX = 2.5; // tiles (120 ft) — the longest roll the caddie will line up
+// The drawn cup: a nominal radius the renderer and the HUD read for scale.
+// It is NOT the holing test any more — see MAKE_CURVE / captureAt below.
 export const CUP_R = 0.058; // tiles
-export const PUTT_OVERRUN = 2.5; // tiles — pace that races farther past never drops
+// Past-cup pace beyond this never drops: a ball arriving with more than a yard
+// of run hits the back lip and spins out. (Was 2.5 tiles = 120 ft of overrun,
+// which made "race it" a free strategy.)
+export const PUTT_OVERRUN = 3 / FEET_PER_TILE; // 0.0625 tiles = 3 ft
+// The pace the make curve is anchored at: Pelz's "17 inches past" rounded to
+// a foot and a half. Dying it at the hole or racing it both make fewer.
+export const PUTT_REF_PACE = 1.5 / FEET_PER_TILE; // 0.03125 tiles
+
+/**
+ * The contract: published PGA one-putt rates by distance in FEET. This table
+ * — not a capture radius — is the model's truth. Everything geometric below
+ * is fitted to reproduce it.
+ * Sources: Broadie / The Brassie / Golfing Focus tour make-percentage tables.
+ */
+export const MAKE_CURVE = [
+  [1, 1.0], [2, 0.99], [3, 0.96], [4, 0.88], [5, 0.77], [6, 0.65], [8, 0.50],
+  [10, 0.40], [15, 0.23], [20, 0.15], [25, 0.10], [30, 0.07], [40, 0.04],
+  [50, 0.03], [60, 0.02], [75, 0.013], [90, 0.01], [120, 0.005],
+];
+
+/** One-putt probability at `ft` feet, log-interpolated between the anchors. */
+export function makeRate(ft) {
+  if (ft <= MAKE_CURVE[0][0]) return MAKE_CURVE[0][1];
+  const last = MAKE_CURVE[MAKE_CURVE.length - 1];
+  if (ft >= last[0]) return last[1];
+  for (let i = 1; i < MAKE_CURVE.length; i++) {
+    const [d1, p1] = MAKE_CURVE[i];
+    if (ft <= d1) {
+      const [d0, p0] = MAKE_CURVE[i - 1];
+      const t = (Math.log(ft) - Math.log(d0)) / (Math.log(d1) - Math.log(d0));
+      return Math.exp(Math.log(p0) + t * (Math.log(p1) - Math.log(p0)));
+    }
+  }
+  return last[1];
+}
+
+/**
+ * The pace modifier on the curve: how much of the cup a ball rolling `over`
+ * tiles past the hole can still use. Dead weight uses all of it; a ball with
+ * three feet of run uses none. This is the aggressive-lag trade-off — pace
+ * buys you arrival (a putt that dies short cannot drop at all) and spends
+ * capture (a racing putt lips out) — expressed as a factor on the make rate,
+ * not as the mechanism that produces it.
+ */
+export function paceCapture(over) {
+  if (over < 0 || over > PUTT_OVERRUN) return 0;
+  const u = over / PUTT_OVERRUN;
+  return 1 - 0.6 * u * u;
+}
 
 /** Putting skill factor: sqrt of the full-swing base. */
 export function puttSkill(profile = DEFAULT_PROFILE) {
   return Math.sqrt(profile.base ?? 1);
 }
 
+// Putt error in FEET: pace 1-sigma ≈ 0.5 + 6% of the putt, line 1-sigma ≈
+// 0.3 + 3.5%. That is what leaves a missed 30-footer ~3 ft away (tour lag
+// reality) instead of the old model's 15 ft, and it is what makes three-putt
+// avoidance a real skill rather than an accident.
+const PACE_SIGMA_A = 0.5 / FEET_PER_TILE;
+const PACE_SIGMA_B = 0.06;
+const LINE_SIGMA_A = 0.3 / FEET_PER_TILE;
+const LINE_SIGMA_B = 0.035;
+
 /** Putt ellipse semi-axes (tiles): long axis is PACE, short axis is LINE. */
 export function puttSigmas(dist, profile = DEFAULT_PROFILE) {
   const s = puttSkill(profile);
   return {
-    long: (0.08 + dist * 0.10) * s, // pace (depth) — the real miss on the green
-    lat: (0.04 + dist * 0.045) * s, // line (lateral) — comparatively tight
+    long: (PACE_SIGMA_A + dist * PACE_SIGMA_B) * s, // pace (depth) — the real miss on the green
+    lat: (LINE_SIGMA_A + dist * LINE_SIGMA_B) * s, // line (lateral) — comparatively tight
   };
+}
+
+// --- capture, derived from the curve ----------------------------------------
+// A real cup is 0.18 ft in radius; a 16-sample quasi-random pattern is not a
+// golf ball. So rather than assert a radius and hope the make rates fall out
+// (they never did — the old 2.8-ft radius holed 86% of 8-footers), we INVERT:
+// for each distance, find the capture width at which the reference-pace
+// pattern holes exactly `makeRate(ft)` of its samples. The empirical curve is
+// the input; the geometry is the fitted part. Misses still finish where the
+// ellipse puts them, so leaves, three-putts and comebacks stay physical.
+
+const CALIB_N = 256;
+const CALIB_OFFSETS = (() => {
+  const pts = [];
+  const GA = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < CALIB_N; i++) {
+    const r = Math.sqrt((i + 0.5) / CALIB_N) * 1.85; // the mean of the 16/48 pattern scales
+    const a = i * GA + 0.35;
+    pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+  }
+  return pts;
+})();
+
+/**
+ * Offsets for expected-putts tabulation. The 16-point pattern is fine for
+ * full swings, where V varies slowly, but on the green it quantizes make
+ * probability to 6.25% — enough to move a 20-footer's expected putts by 0.1.
+ * 96 points buys ~1% granularity for a table that is built once per profile.
+ */
+export const PUTT_TABLE_OFFSETS = (() => {
+  const pts = [];
+  const GA = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < 96; i++) {
+    const r = Math.sqrt((i + 0.5) / 96) * 1.85;
+    const a = i * GA + 0.2;
+    pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+  }
+  return pts;
+})();
+
+const CAPTURE_STEP = 0.01; // tiles (~0.5 ft)
+const CAPTURE_N = Math.round(PUTT_MAX / CAPTURE_STEP) + 1;
+const CAPTURE_MAX = 0.4; // tiles — the bisection ceiling (19 ft; never binding in practice)
+
+/** Fraction of the reference-pace pattern from `d` that a capture of `c` holes. */
+function calibMakeFraction(d, c) {
+  const aim = d + PUTT_REF_PACE;
+  const s = puttSigmas(aim, DEFAULT_PROFILE);
+  let made = 0;
+  for (const o of CALIB_OFFSETS) {
+    const rolled = Math.max(0, aim + o.y * s.long);
+    const over = rolled - d;
+    if (over < 0 || over > PUTT_OVERRUN) continue;
+    // line miss measured at the cup, on a roll line that is nearly the aim line
+    const line = Math.abs(o.x * s.lat) * (rolled > 1e-9 ? d / rolled : 1);
+    if (line <= c * paceCapture(over)) made++;
+  }
+  return made / CALIB_N;
+}
+
+const captureTable = (() => {
+  const t = new Float64Array(CAPTURE_N);
+  for (let i = 0; i < CAPTURE_N; i++) {
+    const d = i * CAPTURE_STEP;
+    const target = makeRate(d * FEET_PER_TILE);
+    let lo = 0;
+    let hi = CAPTURE_MAX;
+    for (let k = 0; k < 34; k++) {
+      const mid = (lo + hi) / 2;
+      if (calibMakeFraction(d, mid) < target) lo = mid;
+      else hi = mid;
+    }
+    t[i] = (lo + hi) / 2;
+  }
+  return t;
+})();
+
+/**
+ * Effective capture width (tiles) for a putt of `d` tiles — the inversion of
+ * MAKE_CURVE through the pattern. It runs ~0.65 ft inside 10 ft and tightens
+ * to ~0.44 ft out at lag range — an order of magnitude under the old 2.8-ft
+ * radius, and it narrows with distance because on a long putt the few balls
+ * that arrive with holeable pace are already the good ones.
+ */
+export function captureAt(d) {
+  const i = d / CAPTURE_STEP;
+  if (i <= 0) return captureTable[0];
+  if (i >= CAPTURE_N - 1) return captureTable[CAPTURE_N - 1];
+  const lo = Math.floor(i);
+  return captureTable[lo] + (captureTable[lo + 1] - captureTable[lo]) * (i - lo);
+}
+
+/**
+ * Analytic make probability for a putt of `d` tiles played `past` tiles past
+ * the cup: the published curve, modified by pace. Exported as the contract
+ * the sampled engine is tested against.
+ */
+export function puttMakeProbability(d, past = PUTT_REF_PACE, profile = DEFAULT_PROFILE) {
+  const aim = d + past;
+  const s = puttSigmas(aim, profile);
+  const c = captureAt(d);
+  let made = 0;
+  for (const o of CALIB_OFFSETS) {
+    const rolled = Math.max(0, aim + o.y * s.long);
+    const over = rolled - d;
+    if (over < 0 || over > PUTT_OVERRUN) continue;
+    const line = Math.abs(o.x * s.lat) * (rolled > 1e-9 ? d / rolled : 1);
+    if (line <= c * paceCapture(over)) made++;
+  }
+  return made / CALIB_N;
 }
 
 /** Finishing points for a putt from `from` rolled at `target`, one per offset. */
@@ -199,26 +381,28 @@ export function puttPoints(from, target, profile = DEFAULT_PROFILE, offsets = UN
 
 /**
  * Did a roll from `from` finishing at `finish` drop? The ball must actually
- * reach the cup (a putt dying at the front door still counts), must not be
- * pacing more than PUTT_OVERRUN past, and must pass within the cup's capture
- * width — which SHRINKS with overrun speed: a racing putt lips out. That
- * gradient is the aggressive-lag trade-off: pace past the hole raises make%
- * up to a point, then costs both the make and the comeback.
+ * reach the cup (a putt dying at the front door does not count — it has to
+ * get there), must not be pacing more than PUTT_OVERRUN (3 ft) past, and must
+ * pass within the cup's effective capture — `captureAt(d)` scaled by
+ * `paceCapture(over)`. Aggregated over a shot pattern this reproduces the
+ * published make curve by construction, with pace as the modifier: dead
+ * weight arrives half the time, three feet of run lips out.
  */
 export function puttHolesOut(from, finish, cup) {
   const vx = finish.x - from.x;
   const vy = finish.y - from.y;
   const len = Math.hypot(vx, vy);
-  if (len < 1e-9) return Math.hypot(cup.x - from.x, cup.y - from.y) <= CUP_R;
+  const d = Math.hypot(cup.x - from.x, cup.y - from.y);
+  if (len < 1e-9) return d <= captureAt(d); // the ball never moved: it was already in
   const ux = vx / len;
   const uy = vy / len;
   const along = (cup.x - from.x) * ux + (cup.y - from.y) * uy; // cup's station on the roll line
   if (len < along - 1e-9) return false; // died short of the hole
   const over = len - along; // how far past the cup this pace carries
-  if (over > PUTT_OVERRUN) return false;
-  const capture = CUP_R * (1 - Math.max(0, over) / PUTT_OVERRUN);
+  const grip = paceCapture(over);
+  if (grip <= 0) return false;
   const off = Math.abs(-(cup.x - from.x) * uy + (cup.y - from.y) * ux); // line miss at the cup
-  return off <= capture;
+  return off <= captureAt(d) * grip;
 }
 
 /** The one real roll: a seeded gaussian draw from the putt ellipse. No wind —

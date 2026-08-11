@@ -8,16 +8,38 @@ import { GREEN, WATER } from './terrain.js';
 import { cellAt, inBounds } from './course.js';
 import {
   lieParams, patternPoints, restingCell, windShift, reach, DEFAULT_PROFILE,
-  PREVIEW_OFFSETS, UNIT_OFFSETS, puttPoints, puttSigmas, puttHolesOut, puttSkill,
-  PUTT_MAX, puttBreakDrift,
+  PREVIEW_OFFSETS, puttPoints, puttSigmas, puttHolesOut, puttSkill,
+  PUTT_MAX, puttBreakDrift, FEET_PER_TILE, PUTT_TABLE_OFFSETS,
 } from './dispersion.js';
 
 const PENALTY = 1; // water / out-of-bounds: stroke-and-distance style
 
-/** Expected putts from a distance (in tiles) on the green. */
+// Broadie's expected-putts baseline, in FEET. Internally consistent with the
+// make curve in dispersion.js: E ≈ 2 − make%, because the comeback from a
+// missed putt is itself nearly automatic until the lag range. This is the
+// published answer the engine's own putt model (`puttsFrom`) is calibrated
+// against; the two agree to a few hundredths across the whole range.
+const PUTTS_CURVE = [
+  [1, 1.00], [2, 1.01], [3, 1.04], [4, 1.13], [5, 1.23], [6, 1.35], [8, 1.50],
+  [10, 1.61], [15, 1.78], [20, 1.87], [25, 1.93], [30, 1.98], [40, 2.06],
+  [50, 2.14], [60, 2.21], [75, 2.32], [90, 2.40], [120, 2.55],
+];
+
+/** Expected putts from a distance (in tiles) on the green — Broadie's curve. */
 export function expectedPutts(d) {
-  if (d <= 0.6) return 1;
-  return Math.min(3, 1 + 0.13 * d + (d > 8 ? 0.1 : 0));
+  const ft = d * FEET_PER_TILE;
+  if (ft <= PUTTS_CURVE[0][0]) return PUTTS_CURVE[0][1];
+  const last = PUTTS_CURVE[PUTTS_CURVE.length - 1];
+  if (ft >= last[0]) return last[1];
+  for (let i = 1; i < PUTTS_CURVE.length; i++) {
+    const [d1, p1] = PUTTS_CURVE[i];
+    if (ft <= d1) {
+      const [d0, p0] = PUTTS_CURVE[i - 1];
+      const t = (Math.log(ft) - Math.log(d0)) / (Math.log(d1) - Math.log(d0));
+      return p0 + t * (p1 - p0);
+    }
+  }
+  return last[1];
 }
 
 /**
@@ -35,10 +57,16 @@ export function strokesField(course, sweeps = 6, profile = DEFAULT_PROFILE) {
     for (let x = 0; x < width; x++) {
       const i = y * width + x;
       const t = cellAt(course, x, y);
-      if (t === GREEN) V[i] = expectedPutts(holeD(x, y));
+      // Green cells are terminal: they are never swept, so their value IS the
+      // putting model. Price them with `puttsFrom` — the same recursion the
+      // putt game plays — so the field and the green agree exactly, instead
+      // of with a crude closed form the putt model then contradicts.
+      if (t === GREEN) V[i] = puttsFrom(holeD(x, y), profile);
       else if (t === WATER) V[i] = Infinity;
       else {
-        V[i] = 1.5 + holeD(x, y) / 9;
+        // Seed above the fixed point: value iteration is a min-contraction, so
+        // starting high converges down and never leaves an optimistic cell.
+        V[i] = 2 + holeD(x, y) / 12;
         order.push({ i, x, y, d: holeD(x, y) });
       }
     }
@@ -86,8 +114,18 @@ export function evaluateAim(course, V, from, target, profile = DEFAULT_PROFILE) 
   const fromV = inBounds(course, from.x, from.y) ? V[from.y * course.width + from.x] : 5;
   let total = 0;
   for (const p of pts) {
-    const rest = restingCell(course, p.x + drift.x, p.y + drift.y);
+    const px = p.x + drift.x;
+    const py = p.y + drift.y;
+    const rest = restingCell(course, px, py);
     if (rest.kind === 'rest') {
+      // On the green, INCHES matter and tiles do not: a 48-ft cell would
+      // price a ball anywhere inside it as a tap-in, which is exactly how a
+      // wedge used to look free. Price green finishes by the ball's own
+      // distance, with the same recursion the putt game plays.
+      if (rest.terrain === GREEN) {
+        total += puttsFrom(Math.hypot(px - course.hole.x, py - course.hole.y), profile);
+        continue;
+      }
       const v = V[rest.y * course.width + rest.x];
       total += Number.isFinite(v) ? v : PENALTY + fromV;
     } else {
@@ -145,9 +183,12 @@ export function onPuttingSurface(course, x, y, fringe = PUTT_FRINGE) {
 // P(d) = 1 + E[P(leave)] under the caddie's own pace policy, iterated to a
 // fixed point on a distance grid and capped at 3 — the "expectedPutts of the
 // leave" recursion, tabulated once per putting-skill level.
-const PUTT_TABLE_STEP = 0.1;
+const PUTT_TABLE_STEP = 0.01; // tiles (~0.5 ft) — inches decide comebacks
 const PUTT_TABLE_N = Math.round(PUTT_MAX / PUTT_TABLE_STEP) + 1;
-const PACE_CANDIDATES = [0, 0.05, 0.1, 0.15, 0.22, 0.32, 0.45, 0.65];
+// Pace grid in TILES past the cup: 0 to 6 ft, the whole realistic range.
+// (Was 0–0.65 tiles = 0–31 ft past, a grid that could only be read as a
+// licence to race every putt.)
+const PACE_CANDIDATES = [0, 0.008, 0.015, 0.021, 0.026, 0.031, 0.038, 0.05, 0.07, 0.1, 0.13];
 const puttTables = new Map(); // skill → Float64Array
 
 function tableLookup(t, d) {
@@ -160,7 +201,9 @@ function tableLookup(t, d) {
 
 function buildPuttTable(profile) {
   const t = new Float64Array(PUTT_TABLE_N);
-  for (let i = 0; i < PUTT_TABLE_N; i++) t[i] = Math.min(3, 1 + 0.5 * i * PUTT_TABLE_STEP);
+  // Seed with Broadie's published curve, then iterate to the model's own
+  // fixed point. If the model is honest the two barely move apart.
+  for (let i = 0; i < PUTT_TABLE_N; i++) t[i] = expectedPutts(i * PUTT_TABLE_STEP);
   const cup = { x: 0, y: 0 };
   for (let sweep = 0; sweep < 6; sweep++) {
     const prev = t.slice();
@@ -171,13 +214,13 @@ function buildPuttTable(profile) {
         const aim = d + past;
         const s = puttSigmas(aim, profile);
         let total = 0;
-        for (const o of UNIT_OFFSETS) {
+        for (const o of PUTT_TABLE_OFFSETS) {
           const rolled = Math.max(0, aim + o.y * s.long); // pace along the line
           const line = o.x * s.lat; // lateral miss at the finish
           if (puttHolesOut({ x: -d, y: 0 }, { x: rolled - d, y: line }, cup)) continue;
           total += tableLookup(prev, Math.hypot(rolled - d, line));
         }
-        best = Math.min(best, 1 + total / UNIT_OFFSETS.length);
+        best = Math.min(best, 1 + total / PUTT_TABLE_OFFSETS.length);
       }
       t[i] = Math.min(3, best);
     }
@@ -233,13 +276,20 @@ export function evaluatePutt(course, V, from, target, profile = DEFAULT_PROFILE)
 }
 
 // Pace grid for the optimal-putt search: tiles past (or short of) the cup.
-const PUTT_PACE_GRID = [-0.6, -0.4, -0.25, -0.15, -0.08, 0, 0.05, 0.1, 0.16, 0.24, 0.34, 0.5, 0.7, 1.0, 1.4, 1.9];
+// −3 ft to +9 ft, which is the whole space a golfer actually chooses inside.
+const PUTT_PACE_GRID = [
+  -0.06, -0.04, -0.025, -0.015, -0.008, 0, 0.005, 0.01, 0.016, 0.021, 0.026, 0.031,
+  0.037, 0.045, 0.055, 0.07, 0.1, 0.14, 0.19,
+];
 
 // Cross-line grid for breaking putts: tiles of aim-off either side of the cup
 // line. Only searched when the line to the cup actually breaks — on a flat
 // green the lateral term stays [0] and the search is exactly the classic one.
+// Resolution matters now that capture is inches, not yards: the first steps
+// are a few inches of aim-off.
 const PUTT_LATERAL_GRID = [
-  0, 0.06, -0.06, 0.12, -0.12, 0.2, -0.2, 0.3, -0.3, 0.45, -0.45, 0.65, -0.65, 0.9, -0.9, 1.3, -1.3,
+  0, 0.01, -0.01, 0.02, -0.02, 0.035, -0.035, 0.06, -0.06, 0.1, -0.1, 0.16, -0.16,
+  0.25, -0.25, 0.4, -0.4, 0.6, -0.6,
 ];
 
 /**
