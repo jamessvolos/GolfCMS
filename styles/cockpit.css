@@ -169,6 +169,34 @@ body {
   color: var(--ink);
 }
 
+/* Camera controls ride under the score chip — still the top-left group, so the
+   cockpit keeps its four corners. The yardage block is pointer-transparent;
+   these two buttons opt back in. */
+#cam-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  margin: 8px 0 0 4px;
+  padding: 4px 5px;
+  pointer-events: auto;
+}
+#cam-controls button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--ink);
+  border-radius: 9px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+#cam-controls button:hover { background: rgba(255, 255, 255, 0.18); }
+#cam-controls button.active { background: var(--accent2); color: var(--bg); border-color: var(--accent2); }
+#recenter { font-size: 14px; letter-spacing: 0; padding: 3px 9px; }
+
 /* ---------- top-right: hole ticker + compact settings ---------- */
 #hud-ticker {
   top: max(10px, env(safe-area-inset-top));
@@ -416,6 +444,9 @@ body {
   #dock-play select, #dock-play button { font-size: 12px; padding: 5px 9px; }
   #hit, #commit { font-size: 17px; padding: 14px 24px; }
   #topin { font-size: clamp(64px, 19vw, 96px); }
+  #cam-controls { margin-top: 6px; }
+  #cam-controls button { font-size: 10px; padding: 3px 8px; letter-spacing: 0.5px; }
+  #recenter { font-size: 13px; }
   #stamp-word { font-size: clamp(26px, 8vw, 40px); border-width: 3px; }
   /* phones: the stamped word stands alone — its number chip duplicates the
      caddie line and score strip, and only ever half-fit behind them */
