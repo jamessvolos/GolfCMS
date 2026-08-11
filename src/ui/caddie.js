@@ -12,7 +12,9 @@ import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
 import { yards, feet, holeYards, parForTiles, clubName } from '../engine/yards.js';
-import { renderCourseArt, drawFlag, drawBall, TILE } from './paint.js';
+import {
+  renderCourseArt, renderGreenArt, drawFlag, drawBall, drawPin, drawBallWorld, TILE,
+} from './paint.js';
 import {
   makeCamera, worldToScreen, screenToWorld, worldTransform, courseCamera,
   frameRect, easeOutCubic, lerpCamera, sameCamera,
@@ -43,6 +45,13 @@ let aimTarget = null;
 let reveal = null; // {your, optimal, score, heat, landing}
 let holeInfo = null; // {par, yds} for the current hole
 let art = null; // offscreen course rendering, rebuilt per hole
+// The green complex: a SECOND art layer at putting resolution, used only while
+// the camera is framing the green. Built lazily — the first time a hole's putt
+// loop opens — and then reused for every frame of every putt on that hole, so
+// it costs one build per hole and nothing per frame. paint.js: renderGreenArt.
+let greenArt = null;
+const greenArtStats = { builds: 0, buildMs: 0, draws: 0 };
+let lastFrameMs = 0; // wall time of the most recent refresh(), for perf checks
 // --- putting state: once the ball reaches the green, every putt is a real
 // decision through the same aim/commit/reveal loop, at green resolution ---
 let putting = false; // in the putt decision loop
@@ -155,6 +164,36 @@ function findGreenRect() {
     }
   }
   return n ? { x0, y0, x1, y1, cx: sx / n, cy: sy / n } : null;
+}
+
+/** Build the green complex for this hole, once. Called when the putt loop
+ *  opens — a hole abandoned before the green never pays for it. */
+function ensureGreenArt() {
+  if (greenArt || !greenRect || !course) return greenArt;
+  greenArt = renderGreenArt(course, greenRect);
+  greenArtStats.builds += 1;
+  greenArtStats.buildMs = +greenArt.ms.toFixed(2);
+  return greenArt;
+}
+
+/** Is the detail layer the one on screen right now? */
+const onGreenArt = () => camMode === 'green' && Boolean(greenArt);
+
+/** The SCREEN direction the sun's shadows fall in: world lower-right, carried
+ *  through the same transform the turf relief was baked under, so the pin's
+ *  shadow and the shaded relief always agree — portrait rotation included. */
+function shadowDir() {
+  const a = toScreen({ x: 0, y: 0 });
+  const b = toScreen({ x: 1, y: 1 });
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  return { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+}
+
+/** One ball, drawn the right size for the framing: a fixed sprite at course
+ *  zoom, world-sized (and therefore tiny, and therefore honest) on the green. */
+function paintBall(px, opts = {}) {
+  if (onGreenArt()) drawBallWorld(ctx, px, camera.scale, opts);
+  else drawBall(ctx, px, opts);
 }
 
 /** What the camera SHOULD be for a framing, at the current size/orientation.
@@ -312,7 +351,7 @@ function drawFlight() {
     const sp = toScreen(at(e));
     const y = sp.y - Math.sin(Math.PI * e) * lift;
     if (k === 0) {
-      drawBall(ctx, { x: sp.x, y });
+      paintBall({ x: sp.x, y });
       continue;
     }
     const a = 0.5 * (1 - k / SAMPLES) * Math.min(1, fx.p * 3);
@@ -382,6 +421,7 @@ function loadHole() {
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
     art = renderCourseArt(course);
+    greenArt = null; // new hole, new green — rebuilt on the first putt
     greenRect = findGreenRect();
     ball = { ...course.tee };
     strokes = 0;
@@ -410,6 +450,7 @@ function loadHole() {
 }
 
 function refresh() {
+  const t0 = performance.now();
   drawBase();
   if (phase === 'aim' && aimTarget) drawAim();
   if (phase === 'reveal' && reveal) drawReveal();
@@ -424,6 +465,7 @@ function refresh() {
   document.getElementById('commit').hidden = phase !== 'reveal';
   document.getElementById('hit').hidden = !(touchMode && phase === 'aim' && aimTarget);
   if (phase === 'reveal' && !stampEl.hidden) positionStamp();
+  lastFrameMs = performance.now() - t0;
 }
 
 function drawBase() {
@@ -436,10 +478,19 @@ function drawBase() {
   if (!camAnim) camera = desiredCamera(camMode);
   beginWorld();
   ctx.drawImage(art, 0, 0);
+  // the green complex rides on top of the course art, in the same world pixels,
+  // so it registers exactly and the course view never sees it
+  if (onGreenArt()) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(greenArt.canvas, greenArt.ox, greenArt.oy, greenArt.w, greenArt.h);
+    greenArtStats.draws += 1;
+  }
   ctx.restore();
-  drawFlag(ctx, toScreen(course.hole));
+  if (onGreenArt()) drawPin(ctx, toScreen(course.hole), camera.scale, shadowDir());
+  else drawFlag(ctx, toScreen(course.hole));
   // during the flight comet the interpolated ball is the only ball on screen
-  if (!(fx && fx.stage === 'flight')) drawBall(ctx, toScreen(putting && puttPos ? puttPos : ball));
+  if (!(fx && fx.stage === 'flight')) paintBall(toScreen(putting && puttPos ? puttPos : ball));
 }
 
 function ellipsePath(from, target, sigmaScale, k, sig = null) {
@@ -574,7 +625,7 @@ function drawReveal() {
   ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 1;
   // where the sampled ball actually went
-  if (reveal.landing) drawBall(ctx, toScreen(reveal.landing));
+  if (reveal.landing) paintBall(toScreen(reveal.landing));
   // the post-shot note now lands as the DOM stamp + glass chip (showStamp),
   // not the painted callout card
 }
@@ -979,7 +1030,9 @@ function beginPutting() {
   phase = 'aim';
   aimTarget = null;
   reveal = null;
-  // the dance floor deserves the room: ease in to the green + its fringe
+  // the dance floor deserves the room: ease in to the green + its fringe, on
+  // the art cut for it (built here so the first zoomed frame already has it)
+  ensureGreenArt();
   requestCam('green');
   const ft = feet(toPin(puttPos));
   verdict.textContent = puttCount === 0 ? copy.puttFirst(ft) : copy.puttNext(puttCount + 1, ft);
@@ -1197,10 +1250,27 @@ hcpSel.addEventListener('change', () => {
 window.__caddie = {
   get state() {
     return { phase, ball, strokes, decisions, round, course, putting, puttPos, puttCount, holedOut,
-      aimTarget, camera: { ...camera }, camMode, rotated, camAnimating: Boolean(camAnim) };
+      aimTarget, camera: { ...camera }, camMode, rotated, camAnimating: Boolean(camAnim),
+      // the green complex: whether it exists, what it cost, how often it drew
+      greenArt: greenArt
+        ? { w: greenArt.w, h: greenArt.h, sub: greenArt.sub, sloped: greenArt.sloped,
+            px: greenArt.canvas.width, ...greenArtStats }
+        : null,
+      greenArtLive: onGreenArt(), frameMs: +lastFrameMs.toFixed(2) };
   },
   aimAt(x, y) { aimTarget = { x, y }; commitDecision(); },
   advance,
+  /** Test hook: repaint both art layers for the course as it stands now. Lets a
+   *  harness stamp a different biome's cells onto the live hole and see the art
+   *  that terrain earns. Never called by the game itself. */
+  rebuildArt() {
+    art = renderCourseArt(course);
+    greenArt = null;
+    greenRect = findGreenRect();
+    V = strokesField(course, 6, profile);
+    if (putting) ensureGreenArt();
+    refresh();
+  },
 };
 
 function startMajor() {
