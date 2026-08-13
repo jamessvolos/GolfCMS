@@ -68,8 +68,14 @@ function merge() {
       const f = `${OUT}/par${par}-${s}.txt`;
       if (!existsSync(f)) continue;
       for (const line of readFileSync(f, 'utf8').split('\n')) {
-        const n = Number(line.trim());
-        if (Number.isInteger(n) && n >= 0) seeds.add(n >>> 0);
+        const t = line.trim();
+        // Number('') is 0, not NaN. Every shard file ends in a newline, so the
+        // obvious `Number(line.trim())` quietly filed a phantom seed 0 in both
+        // tables — and seed 0 happens to derive a par 4, so it passed unnoticed
+        // in the par-4 pool and only surfaced as a mis-filed par 5.
+        if (!t) continue;
+        const n = Number(t);
+        if (Number.isInteger(n) && n > 0 && n <= 0xffffffff) seeds.add(n >>> 0);
       }
     }
     // sorted, so the table is a canonical function of the sweep and a rerun
