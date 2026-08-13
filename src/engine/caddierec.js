@@ -11,6 +11,7 @@ import { generateCourse } from './generate.js';
 import { cellAt } from './course.js';
 import { GREEN } from './terrain.js';
 import { HOLE_LENGTHS } from './yards.js';
+import { certifiedPool } from './certified.js';
 import {
   HANDICAPS, handicapById, lieParamsAt, sampleLanding, samplePuttRoll,
   puttHolesOut, restingCell,
@@ -27,27 +28,74 @@ const PUTT_CAP = 4; // mirror caddie.js mercy rule: four putt decisions, then co
 // The UI (caddie.js loadHole) and the verifier both call THESE two helpers,
 // so the seed→hole mapping can never drift between client and server.
 
-/** Hole seed `index` of a caddie round: one shared substream, drawn in order. */
+/**
+ * Hole seed `index` of a caddie round: one shared substream, drawn in order.
+ *
+ * The raw draw decides the hole's SHAPE — its par, length and biome. Where a
+ * certified pool exists for that par, the seed is then swapped for one drawn
+ * from the pool, so a two-shotter Caddie deals is always a hole `certify.js`
+ * has confirmed contains a decision. Release D measured the alternative: only
+ * about a third of generated par 4s and 5s fork, so two holes in three used to
+ * have one obvious answer.
+ *
+ * The swap PRESERVES THE PAR. Length mix is a property of the round, not of
+ * whichever seeds happened to certify, and a round that quietly stopped dealing
+ * par 5s because they certify less often would be a worse round.
+ *
+ * Par 3s have no pool and are returned untouched — see certified.js.
+ */
 export function caddieHoleSeed(roundSeed, index) {
   const rng = substream(roundSeed >>> 0, 'caddieround');
   let s = 0;
   for (let k = 0; k <= index; k++) s = Math.floor(rng() * 0xffffffff) >>> 0;
-  return s;
+  const pool = certifiedPool(caddieHoleShape(s).par);
+  if (!pool || pool.length === 0) return s;
+  // Index the pool from the raw seed itself, so the mapping stays a pure
+  // function of (roundSeed, index) and the verifier derives it identically.
+  const pick = pool[mix32(s) % pool.length];
+  // A pool seed must still be the par it was filed under; if the table were
+  // ever stale against the generator, dealing the raw hole beats dealing a
+  // par 5 in a par 4's slot.
+  return caddieHoleShape(pick).par === caddieHoleShape(s).par ? pick : s;
+}
+
+/** Avalanche a uint32 so neighbouring seeds do not pick neighbouring holes. */
+function mix32(x) {
+  let h = x >>> 0;
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x7feb352d) >>> 0;
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x846ca68b) >>> 0;
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/**
+ * What a hole seed decides BEFORE any ground is generated: its par, its length
+ * and its biome. Split out from `caddieHoleCourse` so the par of a seed can be
+ * known for the price of three RNG draws instead of a whole course — the
+ * certified-seed table needs exactly that, thousands of times.
+ *
+ * The draw order is the contract. It is the same three draws in the same order
+ * `caddieHoleCourse` always made, so no seed's hole changed when this was
+ * factored out.
+ */
+export function caddieHoleShape(holeSeed) {
+  const lenRng = substream(holeSeed, 'yardage');
+  const band = pickWeighted(lenRng, HOLE_LENGTHS.map((b) => [b, b.weight]));
+  const biome = lenRng() < 0.28 ? 'links' : 'classic';
+  const tiles = randInt(lenRng, band.min, band.max);
+  return { par: band.par, biome, tiles };
 }
 
 /** The course a caddie hole seed generates — length band, biome and all. */
 export function caddieHoleCourse(holeSeed) {
-  const lenRng = substream(holeSeed, 'yardage');
-  const band = pickWeighted(lenRng, HOLE_LENGTHS.map((b) => [b, b.weight]));
-  const biome = lenRng() < 0.28 ? 'links' : 'classic';
-  return generateCourse(holeSeed, biome, {
-    holeDistTiles: randInt(lenRng, band.min, band.max),
-    // Release D: Caddie plays the strategic routing. This is the ONE place the
-    // flag is set, so the UI and `verifyCaddieRound` can never disagree about
-    // what hole a seed means — the same reason the length band is drawn here
-    // and not at either call site.
-    strategic: true,
-  });
+  const { biome, tiles } = caddieHoleShape(holeSeed);
+  // Release D: Caddie plays the strategic routing. This is the ONE place the
+  // flag is set, so the UI and `verifyCaddieRound` can never disagree about
+  // what hole a seed means — the same reason the length band is drawn here and
+  // not at either call site.
+  return generateCourse(holeSeed, biome, { holeDistTiles: tiles, strategic: true });
 }
 
 // --- codec -------------------------------------------------------------------

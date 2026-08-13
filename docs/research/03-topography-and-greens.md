@@ -240,3 +240,76 @@ foot and does most of its work as it dies.
 what is lit and what is shadowed is testable without a DOM: cheap ground is
 strictly lighter than dear ground, water shades below fairway, a degenerate
 field falls back to neutral rather than to noise.
+
+---
+
+## W-F — Certified holes, and why par 3s are not among them
+
+Release D built the instrument and reported an uncomfortable number: about a
+third of generated par 4s and 5s clear M1. Two holes in three had one obvious
+answer. The generator cannot fix that at runtime — a single `strokesField` is
+about a second, so a certify-and-reroll loop would freeze the browser mid-round.
+
+So the fork is filtered **offline**. `scripts/certify-seeds.mjs` sweeps the seed
+space, keeps the seeds that pass, and writes `src/engine/certified.js`;
+`caddieHoleSeed` then deals its two-shotters from that table instead of from the
+raw stream. Runtime cost is an array index.
+
+Three things the design has to get right, all pinned in `certified.test.js`:
+
+- **The swap preserves par.** Length mix belongs to the round, not to whichever
+  pars happened to certify more often. Swapping naively would quietly stop
+  dealing par 5s.
+- **It stays a pure function of `(roundSeed, index)`.** `verifyCaddieRound`
+  re-derives every hole from the round seed; anything else and legitimate rounds
+  fail verification.
+- **An empty pool is a no-op.** The table ships empty while a sweep runs, and a
+  half-built table must never take the game down.
+
+Certification runs at the **scratch** profile. M2 exists precisely because a
+hole plays differently across dispersions; certifying per handicap would
+quadruple the sweep to buy four disjoint hole pools nobody asked for.
+
+### Par 3s are excluded, and it is not a shortcoming of the generator
+
+The obvious par-3 metric is "is aiming at the pin within 0.10 strokes of aiming
+at the fat side of the green?" That question cannot be asked here. Measured over
+24 par 3s, **the two aims are the same tile on 22 of them** — median separation
+1.0 tile. The arithmetic:
+
+```
+240-yd par 3: shot pattern 2σ = 5.6 tiles wide
+median green:                   5.4 tiles across
+```
+
+The pattern is wider than the green, so every aim on the green is the same
+distribution. Two fixes were built and measured before being reverted:
+
+- **Bigger greens, firmer tuck for one-shotters.** Same-aim holes 22/24 → 15/24,
+  pin trouble 2% → 4%. Real movement, not enough.
+- **Shorter par 3s.** At 112–144 yds aiming at the pin beats the fat side by
+  0.19–0.54 strokes — not a decision, an obvious answer with 0% risk.
+
+Underneath both sits a hard floor. A legal pin needs all eight neighbours green,
+so a cup sits ≥1.4 tiles inside the edge, and `carveBunker` adds another
+0.75–1.45 beyond it: **cup-to-sand is structurally ≥2 tiles.** In σ:
+
+| carry | 2 tiles | pattern share in that sand |
+|---|---|---|
+| 112 yds | 3.9σ | ~0.0% |
+| 176 yds | 2.2σ | ~4.3% |
+| 240 yds | 1.4σ | ~17.9% |
+
+A greenside bunker cannot threaten a shot at the flag until the hole is 240
+yards long, by which point nothing else on the green is distinguishable either.
+
+The real statement: **a real pin is cut about four paces from an edge, which at
+16 yards per tile is a fifth of a tile. The board cannot represent a pin
+position.** Par 3s are not under-designed; they are below the grid's resolution.
+That is the same wall the putting game hit and answered with a sub-tile field
+(`GREEN_SUB = 4` in `paint.js`).
+
+So par 3s keep coming from the raw stream and are honestly labelled as
+execution tests rather than decisions. Certifying them needs sub-tile
+resolution for the APPROACH shot — which would sharpen every approach in the
+game, not just one-shotters, and is the natural next piece of engine work.
