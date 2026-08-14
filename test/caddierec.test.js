@@ -10,7 +10,7 @@ import {
   caddieHoleSeed, caddieHoleCourse, encodeCaddieRound, decodeCaddieRound, verifyCaddieRound,
 } from '../src/engine/caddierec.js';
 import {
-  handicapById, lieParams, reach, sampleLanding, samplePuttRoll, puttHolesOut, restingCell,
+  handicapById, lieParamsAt, reach, sampleLanding, samplePuttRoll, puttHolesOut, restingCell,
 } from '../src/engine/dispersion.js';
 import { strokesField, scoreDecision, scorePuttDecision, bestPutt } from '../src/engine/strategy.js';
 import { cellAt } from '../src/engine/course.js';
@@ -24,7 +24,7 @@ const COUNT = 2;
 /** A modest aim toward the hole, integer like the UI commits. `back` tiles of
  *  timidity turn a decent player into a sloppy one. */
 function towardHole(course, ball, back = 0) {
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   const r = Math.max(1, reach(lie, profile) - 1 - back);
   const dx = course.hole.x - ball.x;
   const dy = course.hole.y - ball.y;
@@ -96,7 +96,7 @@ function playRound(roundSeed, count, { sloppy = false } = {}) {
         const from = { ...ball };
         const target = towardHole(course, from, sloppy ? 5 : 0);
         rec.decisions.push({ x: target.x, y: target.y });
-        const lie = lieParams(cellAt(course, from.x, from.y));
+        const lie = lieParamsAt(course, from.x, from.y);
         const score = scoreDecision(course, V, from, target, profile);
         const land = sampleLanding(course, from, target, lie.sigmaScale, strokes, profile);
         const rest = restingCell(course, land.x, land.y);

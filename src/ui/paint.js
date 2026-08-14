@@ -6,12 +6,14 @@
 // game has always used, drawn at 1 world pixel per tile-pixel. renderGreenArt()
 // is the green complex — the same ground, repainted at GREEN_SUB× resolution
 // for the putting camera, with mowing at putting pitch, a collar, shaded relief
-// and fall lines derived from the slope tiles, the cup at CUP_R, and a feet
+// and fall lines read off the ENGINE's height field (relief.js) — or, on a course
+// that carries none, off the legacy slope tiles — the cup at CUP_R, and a feet
 // grid. It covers only the green's own silhouette, so it drops onto the course
 // art with no rectangular seam and the course view never sees it.
 
 import { FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE, slopeDir } from '../engine/terrain.js';
 import { cellAt, inBounds } from '../engine/course.js';
+import { heightAt, pullAt, FT_PER_PULL } from '../engine/relief.js';
 import {
   CUP_R, DEFAULT_PROFILE, UNIT_OFFSETS, PUTT_OVERRUN,
   puttPoints, puttSigmas, puttHolesOut, puttBreakDrift, restingCell,
@@ -20,6 +22,8 @@ import { puttsFrom, onPuttingSurface } from '../engine/strategy.js';
 import { YARDS_PER_TILE } from '../engine/yards.js';
 
 export const TILE = 24;
+
+import { terrainLoops } from './contours.js';
 
 const INK = {
   roughBase: '#48793f',
@@ -40,13 +44,107 @@ const INK = {
   slope: '#97b26e',
 };
 
-/** Rounded, slightly-enlarged cell rect — overlapping same-color blobs merge
- *  into organic shapes instead of a tile grid. */
-function blob(ctx, x, y, grow = 3, r = 7) {
-  ctx.roundRect(x * TILE - grow, y * TILE - grow, TILE + grow * 2, TILE + grow * 2, r);
+/**
+ * The smooth outline of a terrain class, as a Path2D. This is the whole art
+ * style change in one line: shapes come from `contours.js` — a smoothed field
+ * marched into organic closed curves — instead of a union of rounded tile
+ * rects. A bunker is a bunker now, not a plus-sign.
+ *
+ * Cached per (course, match, grow, name): renderCourseArt layers the SAME
+ * geometry several times (fill, lip, depth), and marching it once is both
+ * faster and guarantees the layers register exactly.
+ */
+// --- material texture --------------------------------------------------------
+// The shapes went organic; the fills were still flat poster colour. These are
+// procedural material passes: seamless value-noise tiles composited in
+// soft-light through the same contour paths the shapes are drawn with. Neutral
+// grey is a no-op in soft-light, so every texture is a modulation around 128 —
+// the palette stays the palette, the ground just stops being paint.
+// Fixed seeds, not per-course: texture is texture, and identical texture on
+// every hole is exactly how real turf behaves on real aerials.
+
+const noiseCache = new Map();
+
+/** Seamless value-noise tile: lattice noise, bilinear, indices wrapped. */
+function valueNoiseTile(seed, size = 128, cell = 16, swing = 60) {
+  const key = `${seed}:${size}:${cell}:${swing}`;
+  if (noiseCache.has(key)) return noiseCache.get(key);
+  const n = Math.max(2, Math.round(size / cell));
+  let st = (seed >>> 0) || 1;
+  const rnd = () => {
+    st ^= st << 13; st >>>= 0;
+    st ^= st >>> 17;
+    st ^= st << 5; st >>>= 0;
+    return st / 0xffffffff;
+  };
+  const lat = new Float32Array(n * n);
+  for (let i = 0; i < lat.length; i++) lat[i] = rnd() * 2 - 1;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const g = c.getContext('2d');
+  const img = g.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    const ly = (y / size) * n;
+    const y0 = Math.floor(ly) % n;
+    const y1 = (y0 + 1) % n;
+    const fy = ly - Math.floor(ly);
+    const sy = fy * fy * (3 - 2 * fy);
+    for (let x = 0; x < size; x++) {
+      const lx = (x / size) * n;
+      const x0 = Math.floor(lx) % n;
+      const x1 = (x0 + 1) % n;
+      const fx = lx - Math.floor(lx);
+      const sx = fx * fx * (3 - 2 * fx);
+      const v =
+        lat[y0 * n + x0] * (1 - sx) * (1 - sy) + lat[y0 * n + x1] * sx * (1 - sy) +
+        lat[y1 * n + x0] * (1 - sx) * sy + lat[y1 * n + x1] * sx * sy;
+      const grey = Math.round(128 + swing * v);
+      const o = (y * size + x) * 4;
+      img.data[o] = grey;
+      img.data[o + 1] = grey;
+      img.data[o + 2] = grey;
+      img.data[o + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  noiseCache.set(key, c);
+  return c;
 }
 
-function layer(ctx, course, match, fill, { grow = 3, shadow = null } = {}) {
+/** Composite noise layers through a clip path (or the whole canvas). */
+function paintMaterial(ctx, path, layers) {
+  ctx.save();
+  if (path) ctx.clip(path);
+  for (const { tile, alpha, mode = 'soft-light', scale = 1 } of layers) {
+    const pat = ctx.createPattern(tile, 'repeat');
+    if (!pat) continue;
+    try { pat.setTransform(new DOMMatrix().scale(scale)); } catch { /* coarse is fine */ }
+    ctx.globalCompositeOperation = mode;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = pat;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+  ctx.restore();
+}
+
+const pathCache = new WeakMap();
+function terrainPath(course, match, { grow = 0, name = 'ground', wobble } = {}) {
+  let byKey = pathCache.get(course);
+  if (!byKey) pathCache.set(course, (byKey = new Map()));
+  const key = name + ':' + grow;
+  if (byKey.has(key)) return byKey.get(key);
+  const p = new Path2D();
+  for (const loop of terrainLoops(course, match, { grow, name, wobble, tilePx: TILE })) {
+    p.moveTo(loop[0][0], loop[0][1]);
+    for (let i = 1; i < loop.length; i++) p.lineTo(loop[i][0], loop[i][1]);
+    p.closePath();
+  }
+  byKey.set(key, p);
+  return p;
+}
+
+function layer(ctx, course, match, fill, { grow = 3, shadow = null, name = 'ground' } = {}) {
   ctx.save();
   if (shadow) {
     ctx.shadowColor = shadow;
@@ -54,37 +152,30 @@ function layer(ctx, course, match, fill, { grow = 3, shadow = null } = {}) {
     ctx.shadowOffsetY = 3;
   }
   ctx.fillStyle = fill;
-  ctx.beginPath();
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (match(cellAt(course, x, y))) blob(ctx, x, y, grow);
-    }
-  }
-  ctx.fill();
+  ctx.fill(terrainPath(course, match, { grow, name }));
   ctx.restore();
 }
 
-/** Diagonal mowing stripes clipped to a terrain type. */
-function stripes(ctx, course, match, color, band) {
+/**
+ * Mowing stripes clipped to a terrain path — and ANGLED. A crew mows a fairway
+ * across the line of play, so the bands run perpendicular to tee→cup instead
+ * of at one global diagonal that ignores the hole entirely. The angle is the
+ * hole's own; on the green the bands are finer and turn 45° from it, the way
+ * a second mowing pass does.
+ */
+function stripes(ctx, course, match, color, band, { name = 'ground', angleOffset = 0 } = {}) {
   ctx.save();
-  ctx.beginPath();
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (match(cellAt(course, x, y))) blob(ctx, x, y, 2);
-    }
-  }
-  ctx.clip();
+  ctx.clip(terrainPath(course, match, { grow: 2, name }));
   ctx.fillStyle = color;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
-  for (let d = -h; d < w + h; d += band * 2) {
-    ctx.beginPath();
-    ctx.moveTo(d, 0);
-    ctx.lineTo(d + band, 0);
-    ctx.lineTo(d + band - h, h);
-    ctx.lineTo(d - h, h);
-    ctx.closePath();
-    ctx.fill();
+  const holeAngle = Math.atan2(course.hole.y - course.tee.y, course.hole.x - course.tee.x);
+  const a = holeAngle + Math.PI / 2 + angleOffset;
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(a);
+  const R = Math.hypot(w, h);
+  for (let d = -R; d < R; d += band * 2) {
+    ctx.fillRect(d, -R, band, R * 2);
   }
   ctx.restore();
 }
@@ -99,28 +190,48 @@ export function renderCourseArt(course) {
   // ground: rough with a coarse mottle so big areas don't read flat
   ctx.fillStyle = INK.roughBase;
   ctx.fillRect(0, 0, off.width, off.height);
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (cellAt(course, x, y) === ROUGH && (x * 7 + y * 13) % 5 === 0) {
-        ctx.fillStyle = INK.roughDark;
-        ctx.beginPath();
-        ctx.arc((x + 0.5) * TILE, (y + 0.5) * TILE, TILE * 0.55, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
+  // The meadow: layered value noise over the whole ground instead of the old
+  // disc mottle — discs read as leopard print the moment the shapes went
+  // organic. Three octaves: broad colour drift, patchiness, blade-level nap.
+  paintMaterial(ctx, null, [
+    { tile: valueNoiseTile(11, 128, 48, 46), alpha: 0.5, scale: 3.4 },
+    { tile: valueNoiseTile(23, 128, 20, 52), alpha: 0.3, scale: 1.4 },
+    { tile: valueNoiseTile(37, 128, 6, 40), alpha: 0.22, scale: 0.8 },
+  ]);
 
   const is = (t) => (v) => v === t;
   // fringe halo under fairway+green ties the mown shapes together
-  layer(ctx, course, (t) => t === FAIRWAY || t === GREEN, INK.fringe, { grow: 5 });
-  layer(ctx, course, is(FAIRWAY), INK.fairway, { grow: 3 });
-  stripes(ctx, course, is(FAIRWAY), 'rgba(255,255,255,0.07)', 34);
-  layer(ctx, course, is(SAND), INK.sand, { grow: 2, shadow: 'rgba(60,40,10,0.45)' });
-  // bunker lips: a darker inner rim
-  layer(ctx, course, is(SAND), INK.sandShade, { grow: -4 });
-  layer(ctx, course, is(SAND), INK.sand, { grow: -6 });
-  layer(ctx, course, is(WATER), INK.waterDeep, { grow: 2, shadow: 'rgba(10,30,60,0.5)' });
-  layer(ctx, course, is(WATER), INK.water, { grow: -3 });
+  layer(ctx, course, (t) => t === FAIRWAY || t === GREEN, INK.fringe, { grow: 5, name: 'fringe' });
+  layer(ctx, course, is(FAIRWAY), INK.fairway, { grow: 3, name: 'fairway' });
+  stripes(ctx, course, is(FAIRWAY), 'rgba(255,255,255,0.07)', 34, { name: 'fairway' });
+  paintMaterial(ctx, terrainPath(course, is(FAIRWAY), { grow: 3, name: 'fairway' }), [
+    { tile: valueNoiseTile(41, 128, 14, 40), alpha: 0.2, scale: 1.2 },
+    { tile: valueNoiseTile(43, 128, 5, 34), alpha: 0.16, scale: 0.7 },
+  ]);
+  layer(ctx, course, is(SAND), INK.sand, { grow: 2, shadow: 'rgba(60,40,10,0.45)', name: 'sand' });
+  // bunker lip: the same contour stroked from inside, so the rim follows every
+  // curve of the shape exactly instead of being a second, smaller shape
+  ctx.save();
+  ctx.clip(terrainPath(course, is(SAND), { grow: 2, name: 'sand' }));
+  ctx.strokeStyle = INK.sandShade;
+  ctx.lineWidth = 7;
+  ctx.stroke(terrainPath(course, is(SAND), { grow: 2, name: 'sand' }));
+  ctx.restore();
+  paintMaterial(ctx, terrainPath(course, is(SAND), { grow: 2, name: 'sand' }), [
+    { tile: valueNoiseTile(53, 128, 22, 36), alpha: 0.32, scale: 1.6 }, // raked drift
+    { tile: valueNoiseTile(59, 128, 3, 44), alpha: 0.26, scale: 0.5 },  // grain
+  ]);
+  layer(ctx, course, is(WATER), INK.waterDeep, { grow: 2, shadow: 'rgba(10,30,60,0.5)', name: 'water' });
+  layer(ctx, course, is(WATER), INK.water, { grow: -4, name: 'water' });
+  paintMaterial(ctx, terrainPath(course, is(WATER), { grow: 2, name: 'water' }), [
+    { tile: valueNoiseTile(61, 128, 34, 42), alpha: 0.35, scale: 2.2 }, // depth
+  ]);
+  // shoreline: a bright hairline where water meets land
+  ctx.save();
+  ctx.strokeStyle = 'rgba(200,230,255,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke(terrainPath(course, is(WATER), { grow: 2, name: 'water' }));
+  ctx.restore();
   // ripple glints
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 1.5;
@@ -136,10 +247,13 @@ export function renderCourseArt(course) {
       }
     }
   }
-  layer(ctx, course, is(ICE), INK.ice, { grow: 2, shadow: 'rgba(120,180,200,0.4)' });
-  layer(ctx, course, is(GREEN), INK.green, { grow: 3, shadow: 'rgba(20,60,20,0.45)' });
-  stripes(ctx, course, is(GREEN), 'rgba(255,255,255,0.09)', 16);
-  layer(ctx, course, (t) => !!slopeDir(t), INK.slope, { grow: 1 });
+  layer(ctx, course, is(ICE), INK.ice, { grow: 2, shadow: 'rgba(120,180,200,0.4)', name: 'ice' });
+  layer(ctx, course, is(GREEN), INK.green, { grow: 3, shadow: 'rgba(20,60,20,0.45)', name: 'green' });
+  stripes(ctx, course, is(GREEN), 'rgba(255,255,255,0.09)', 16, { name: 'green', angleOffset: Math.PI / 4 });
+  paintMaterial(ctx, terrainPath(course, is(GREEN), { grow: 3, name: 'green' }), [
+    { tile: valueNoiseTile(67, 128, 4, 26), alpha: 0.14, scale: 0.6 },
+  ]);
+  layer(ctx, course, (t) => !!slopeDir(t), INK.slope, { grow: 1, name: 'slope' });
   // slope arrows
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
@@ -158,26 +272,51 @@ export function renderCourseArt(course) {
     }
   }
 
-  // tree canopies: clustered discs with seeded jitter, shadow, and highlight
+  // the land itself: a hillshade of the engine's height field, laid over the
+  // mown ground before the canopies so trees keep their own shadows
+  paintCourseRelief(ctx, course, off.width, off.height);
+
+  // Trees, in PASSES rather than per tile: every cast shadow first, then every
+  // canopy body, then every highlight. Interleaved per-tile drawing put each
+  // tree's shadow ON TOP of its neighbour's canopy, so a stand of trees read
+  // as separate polka dots; layered, adjacent canopies fuse into woodland with
+  // one shared shadow edge. The shadows fall along the same light the
+  // hillshade answers to, not straight down.
+  const canopies = [];
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
       if (cellAt(course, x, y) !== TREES) continue;
       const j = ((x * 2654435761 + y * 40503) >>> 16) % 7;
-      const cx = (x + 0.5) * TILE + (j % 3) - 1;
-      const cy = (y + 0.5) * TILE + (j % 2) * 2 - 1;
-      const r = TILE * (0.52 + (j % 4) * 0.045);
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.35)';
-      ctx.shadowBlur = 6;
-      ctx.shadowOffsetY = 4;
-      ctx.fillStyle = INK.canopy;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-      ctx.fillStyle = INK.canopyLight;
-      ctx.beginPath(); ctx.arc(cx - r * 0.25, cy - r * 0.3, r * 0.55, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = INK.canopyDark;
-      ctx.beginPath(); ctx.arc(cx + r * 0.3, cy + r * 0.32, r * 0.4, 0, Math.PI * 2); ctx.fill();
+      canopies.push({
+        cx: (x + 0.5) * TILE + (j % 3) - 1,
+        cy: (y + 0.5) * TILE + (j % 2) * 2 - 1,
+        r: TILE * (0.52 + (j % 4) * 0.045),
+      });
     }
+  }
+  const sx = -LIGHT.x * 5; // the sun sits at LIGHT; shadows fall away from it
+  const sy = -LIGHT.y * 5;
+  ctx.fillStyle = 'rgba(10, 26, 14, 0.38)';
+  for (const c of canopies) {
+    ctx.beginPath();
+    ctx.arc(c.cx + sx, c.cy + sy, c.r * 1.04, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = INK.canopy;
+  for (const c of canopies) {
+    ctx.beginPath();
+    ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const c of canopies) {
+    ctx.fillStyle = INK.canopyLight;
+    ctx.beginPath();
+    ctx.arc(c.cx + LIGHT.x * c.r * 0.32, c.cy + LIGHT.y * c.r * 0.32, c.r * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = INK.canopyDark;
+    ctx.beginPath();
+    ctx.arc(c.cx - LIGHT.x * c.r * 0.36, c.cy - LIGHT.y * c.r * 0.36, c.r * 0.36, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // vignette: the property fades into the treeline
@@ -191,6 +330,57 @@ export function renderCourseArt(course) {
   ctx.fillRect(0, 0, off.width, off.height);
 
   return off;
+}
+
+// Whole-property shaded relief. Unlike the green page — which normalizes to the
+// steepest reading on THAT green, so every green gets a legible picture — the
+// course view maps grade to shade ABSOLUTELY: a 10% face is full contrast and a
+// flat property produces a uniform mid-grey, which in `overlay` is a no-op. That
+// is what makes a gentle hole look gentle and a dramatic one look dramatic on
+// the same screen, instead of every hole looking equally hilly.
+const COURSE_SHADE_RES = 4; // samples per tile
+const COURSE_SHADE_FULL = 0.06; // the grade that saturates the shading
+const COURSE_SHADE_ALPHA = 0.55;
+
+function paintCourseRelief(ctx, course, w, h) {
+  const relief = course?.relief;
+  if (!relief) return;
+  const bw = Math.max(2, course.width * COURSE_SHADE_RES);
+  const bh = Math.max(2, course.height * COURSE_SHADE_RES);
+  const buf = document.createElement('canvas');
+  buf.width = bw;
+  buf.height = bh;
+  const bctx = buf.getContext('2d');
+  const img = bctx.createImageData(bw, bh);
+  const ds = 1 / COURSE_SHADE_RES;
+  for (let j = 0; j < bh; j++) {
+    const ty = (j + 0.5) * ds - 0.5;
+    for (let i = 0; i < bw; i++) {
+      const tx = (i + 0.5) * ds - 0.5;
+      const p = pullAt(relief, tx, ty); // fall line, in pull units
+      // a face falling toward the light leans into it and lights up
+      const grade = (p.x * LIGHT.x + p.y * LIGHT.y) * FT_PER_PULL / FT_PER_TILE;
+      const v = Math.max(-1, Math.min(1, grade / COURSE_SHADE_FULL));
+      const o = (j * bw + i) * 4;
+      // Warm light, cool shade — not grey. In `overlay`, a channel above 128
+      // brightens and below darkens, so pushing red hardest on lit faces and
+      // letting blue linger in the shade grades the land like late sun instead
+      // of like a depth map. Neutral ground stays exactly 128: a flat hole is
+      // still untouched.
+      img.data[o] = Math.round(128 + 124 * v);
+      img.data[o + 1] = Math.round(128 + 106 * v);
+      img.data[o + 2] = Math.round(128 + (v > 0 ? 64 : 92) * v);
+      img.data[o + 3] = 255;
+    }
+  }
+  bctx.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = COURSE_SHADE_ALPHA;
+  ctx.drawImage(buf, 0, 0, w, h);
+  ctx.restore();
 }
 
 // --- the green complex ------------------------------------------------------
@@ -322,7 +512,58 @@ function buildSlopeField(course, t0x, t0y, tw, th) {
   // than the softest real lean earns: a green barely touched by slope draws a
   // barely-there picture, and a flat one draws nothing at all.
   const gain = peak > 0 ? 1 / Math.max(peak, SOFTEST_LEAN) : 0;
-  return { gx, gy, tw, th, t0x, t0y, peak, gain, flat: peak <= 1e-6 };
+  return { gx, gy, tw, th, t0x, t0y, peak, gain, flat: peak <= 1e-6, source: 'tiles' };
+}
+
+// The floor on display gain for an ENGINE-derived field. The tile model's floor
+// (SOFTEST_LEAN) is the softest lean a single neighbouring slope tile can
+// produce after blurring — a quantum that a continuous field simply does not
+// have. Its analogue here is a grade a golfer would actually call a slope: 2%.
+// Below it a green draws proportionally gentler rather than being normalized up
+// to full contrast, which is what keeps a flat hole looking flat.
+const RELIEF_SOFTEST = (0.02 * FT_PER_TILE) / FT_PER_PULL;
+/** A green so level the book has nothing to say: under a fifth of a percent. */
+const RELIEF_FLAT = (0.002 * FT_PER_TILE) / FT_PER_PULL;
+
+/**
+ * The same field, read off the ENGINE's height field instead of the tile codes.
+ * `pullAt` returns the fall line in the very units buildSlopeField produces
+ * (1.0 = one SLOPE_* tile underfoot), so every layer downstream — shaded relief,
+ * fall lines, break arrows, the slope heat page, the contours — is unchanged
+ * code reading a truer field. No blur pass: the engine's field is already
+ * continuous, and smoothing it would put the picture back out of step with the
+ * physics, which is the entire point of this release.
+ */
+function buildReliefField(course, t0x, t0y, tw, th) {
+  const relief = course.relief;
+  const gx = new Float32Array(tw * th);
+  const gy = new Float32Array(tw * th);
+  for (let j = 0; j < th; j++) {
+    for (let i = 0; i < tw; i++) {
+      const p = pullAt(relief, t0x + i, t0y + j);
+      gx[j * tw + i] = p.x;
+      gy[j * tw + i] = p.y;
+    }
+  }
+  let peak = 0;
+  for (let j = 0; j < th; j++) {
+    for (let i = 0; i < tw; i++) {
+      const x = t0x + i;
+      const y = t0y + j;
+      if (!inBounds(course, x, y) || cellAt(course, x, y) !== GREEN) continue;
+      peak = Math.max(peak, Math.hypot(gx[j * tw + i], gy[j * tw + i]));
+    }
+  }
+  const gain = peak > 0 ? 1 / Math.max(peak, RELIEF_SOFTEST) : 0;
+  return { gx, gy, tw, th, t0x, t0y, peak, gain, flat: peak <= RELIEF_FLAT, source: 'relief' };
+}
+
+/** The slope field over a tile window: the engine's height field where the
+ *  course has one, the legacy slope tiles where it does not. */
+function slopeFieldFor(course, t0x, t0y, tw, th) {
+  return course?.relief
+    ? buildReliefField(course, t0x, t0y, tw, th)
+    : buildSlopeField(course, t0x, t0y, tw, th);
 }
 
 /** Bilinear read of the slope field at a fractional TILE coordinate. */
@@ -342,12 +583,15 @@ function sampleSlope(f, x, y) {
 
 /** The green's blob silhouette, grown by `grow` world pixels — the same shape
  *  language renderCourseArt uses, so the two layers register exactly. */
-function greenSilhouette(path, course, grow, r) {
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (cellAt(course, x, y) !== GREEN) continue;
-      path.roundRect(x * TILE - grow, y * TILE - grow, TILE + grow * 2, TILE + grow * 2, r);
-    }
+function greenSilhouette(path, course, grow) {
+  // The same contour engine as the course view, on the same 'green' wobble
+  // stream — so the book's collar and the course's green are the SAME shape at
+  // two magnifications, not two approximations that disagree at the seam. The
+  // old corner-radius argument died with the tile blobs.
+  for (const loop of terrainLoops(course, (t) => t === GREEN, { grow, name: 'green', tilePx: TILE })) {
+    path.moveTo(loop[0][0], loop[0][1]);
+    for (let i = 1; i < loop.length; i++) path.lineTo(loop[i][0], loop[i][1]);
+    path.closePath();
   }
 }
 
@@ -618,15 +862,15 @@ export function renderGreenArt(course, rect, { breaks = 'lines' } = {}) {
   // Silhouettes. Each cut is a UNION of grown tile blobs, so its rim has to be
   // painted as the difference between two unions — stroking the path itself
   // would outline every tile inside the shape, not the shape.
-  const shape = (grow, r) => {
+  const shape = (grow) => {
     const p = new Path2D();
-    greenSilhouette(p, course, grow, r);
+    greenSilhouette(p, course, grow);
     return p;
   };
-  const collarLip = shape(COLLAR_GROW, 13);
-  const collar = shape(COLLAR_GROW - LIP, 13 - LIP);
-  const surfaceLip = shape(GREEN_GROW, 7);
-  const surface = shape(GREEN_GROW - LIP * 0.8, 7 - LIP * 0.8);
+  const collarLip = shape(COLLAR_GROW);
+  const collar = shape(COLLAR_GROW - LIP);
+  const surfaceLip = shape(GREEN_GROW);
+  const surface = shape(GREEN_GROW - LIP * 0.8);
 
   // --- collar / fringe: a shorter, cross-mown ring so the boundary reads -----
   ctx.fillStyle = GINK.collarRim;
@@ -658,7 +902,7 @@ export function renderGreenArt(course, rect, { breaks = 'lines' } = {}) {
   const t0y = Math.floor(oy / TILE) - 2;
   const tw = Math.ceil(w / TILE) + 5;
   const th = Math.ceil(h / TILE) + 5;
-  const field = buildSlopeField(course, t0x, t0y, tw, th);
+  const field = slopeFieldFor(course, t0x, t0y, tw, th);
   if (!field.flat) {
     paintRelief(ctx, field, box, surfaceLip, field.gain);
     if (breaks === 'lines') paintFallLines(ctx, course, field, box, surfaceLip, field.gain);
@@ -975,7 +1219,7 @@ export function greenSlopeField(course, geo) {
   const t0y = Math.floor(geo.oy / TILE) - 2;
   const tw = Math.ceil(geo.w / TILE) + 5;
   const th = Math.ceil(geo.h / TILE) + 5;
-  return buildSlopeField(course, t0x, t0y, tw, th);
+  return slopeFieldFor(course, t0x, t0y, tw, th);
 }
 
 /** Steepest grade anywhere on this green, in percent. */
@@ -999,9 +1243,9 @@ function bookCanvas(geo) {
   return { off, ctx };
 }
 
-function silhouette(course, grow, r) {
+function silhouette(course, grow) {
   const p = new Path2D();
-  greenSilhouette(p, course, grow, r);
+  greenSilhouette(p, course, grow);
   return p;
 }
 
@@ -1343,13 +1587,22 @@ export function renderHeatLayer(course, rect, kind = 'slope', opts = {}) {
 }
 
 // --- 4. contours -------------------------------------------------------------
-// The slope field is a GRADIENT; a contour needs a HEIGHT. We recover one by
-// solving ∇h = −g over the window (up is against the fall line) with Jacobi
-// relaxation: each sample relaxes toward the mean of what its four neighbours
-// imply it should be, h(p) = mean_n( h(n) + g_mid·e·ds ). That is the least-
-// squares surface for the field — stable for any field, exactly zero for a flat
-// one, and it needs no integration order or seed point. Levels are then walked
-// out with marching squares at a fixed one-FOOT interval.
+// A contour needs a HEIGHT. Where the course carries relief the engine HAS one —
+// `heightAt` in feet, the very surface the ball is rolling on — so the page is
+// sampled straight off it and the picture and the physics finally describe the
+// same land.
+//
+// Where it does not (a hand-built course, an old serialized hole), the slope
+// field is only a GRADIENT, and we recover a height by solving ∇h = −g over the
+// window (up is against the fall line) with Jacobi relaxation: each sample
+// relaxes toward the mean of what its four neighbours imply it should be,
+// h(p) = mean_n( h(n) + g_mid·e·ds ). That is the least-squares surface for the
+// field — stable for any field, exactly zero for a flat one, and it needs no
+// integration order or seed point. That path is kept, unchanged, so nothing
+// that used to draw stops drawing.
+//
+// Both produce the same surface record, in PULL units (see elevationFeet), so
+// marching squares below walks either at a fixed one-FOOT interval.
 
 export const CONTOUR_RES = 4;      // elevation samples per tile
 export const CONTOUR_ITERS = 260;  // Jacobi sweeps — the window is ~50 cells wide
@@ -1374,7 +1627,7 @@ export function integrateElevation(field, { res = CONTOUR_RES, iters = CONTOUR_I
   const t0x = field.t0x;
   const t0y = field.t0y;
   const vals = new Float32Array(ew * eh);
-  const empty = { vals, ew, eh, res, t0x, t0y, min: 0, max: 0, flat: true };
+  const empty = { vals, ew, eh, res, t0x, t0y, min: 0, max: 0, flat: true, source: 'integrated' };
   if (field.flat) return empty;
   const ds = 1 / res;
   // pre-sample the gradient at every node once — the inner loop is hot
@@ -1417,7 +1670,49 @@ export function integrateElevation(field, { res = CONTOUR_RES, iters = CONTOUR_I
     if (cur[k] < min) min = cur[k];
     if (cur[k] > max) max = cur[k];
   }
-  return { vals: cur, ew, eh, res, t0x, t0y, min, max, flat: false };
+  return { vals: cur, ew, eh, res, t0x, t0y, min, max, flat: false, source: 'integrated' };
+}
+
+/**
+ * The engine's own height field, sampled over a book window into the same
+ * surface record `integrateElevation` produces — zero-meaned, in pull units, so
+ * `contourSegments` and CONTOUR_INTERVAL_PULL keep their exact meaning. This is
+ * the honest path: no integration, no relaxation, no guessing — the isolines
+ * are level sets of the surface the ball actually rolls on.
+ */
+export function reliefElevation(relief, field, { res = CONTOUR_RES } = {}) {
+  const ew = Math.max(2, Math.round(field.tw * res));
+  const eh = Math.max(2, Math.round(field.th * res));
+  const { t0x, t0y } = field;
+  const ds = 1 / res;
+  const vals = new Float32Array(ew * eh);
+  let mean = 0;
+  for (let j = 0; j < eh; j++) {
+    for (let i = 0; i < ew; i++) {
+      const v = heightAt(relief, t0x + i * ds, t0y + j * ds) / FT_PER_PULL;
+      vals[j * ew + i] = v;
+      mean += v;
+    }
+  }
+  mean /= vals.length;
+  let min = Infinity;
+  let max = -Infinity;
+  for (let k = 0; k < vals.length; k++) {
+    vals[k] -= mean;
+    if (vals[k] < min) min = vals[k];
+    if (vals[k] > max) max = vals[k];
+  }
+  return { vals, ew, eh, res, t0x, t0y, min, max, flat: max - min < 1e-6, source: 'relief' };
+}
+
+/**
+ * The elevation surface for a book window: the engine's field where the course
+ * has one, the integrated slope field where it does not.
+ */
+export function elevationSurface(course, field, opts = {}) {
+  return course?.relief
+    ? reliefElevation(course.relief, field, opts)
+    : integrateElevation(field, opts);
 }
 
 /**
@@ -1489,7 +1784,7 @@ export function renderContourLayer(course, rect, opts = {}) {
   const geo = greenBookGeometry(course, rect, opts);
   const field = opts.field ?? greenSlopeField(course, geo);
   const { off, ctx } = bookCanvas(geo);
-  const elev = field.flat ? null : integrateElevation(field, opts);
+  const elev = field.flat ? null : elevationSurface(course, field, opts);
   const interval = opts.interval ?? CONTOUR_INTERVAL_PULL;
   const segs = elev ? contourSegments(elev, interval) : [];
   if (segs.length) {
@@ -1521,6 +1816,7 @@ export function renderContourLayer(course, rect, opts = {}) {
     segments: segs.length,
     reliefFt: elev ? elevationFeet(elev.max - elev.min) : 0,
     flat: !!field.flat,
+    source: elev ? elev.source ?? 'integrated' : 'none',
   });
 }
 
@@ -1931,4 +2227,167 @@ export function renderGreenBook(course, rect, opts = {}) {
     sloped: !field.flat,
     ms,
   };
+}
+
+// --- the expected-strokes cone -----------------------------------------------
+// Release E. The caddie already knows, for every tile on the hole, what it
+// costs to finish there — that is `V`, the field the whole scoring model is
+// built on. Until now the only way to see it was the reveal heatmap, which is
+// a wall of colour that arrives after the decision is made.
+//
+// The cone shows it DURING the decision, and the design constraint is that it
+// must not read as data. No colour, no legend, no numbers: cheap ground is
+// lit, expensive ground falls into shadow, and the eye reads it as terrain the
+// sun happens to be catching. It is drawn in `soft-light` at a very low alpha
+// for exactly that reason — the mode preserves the art's own hue and contrast
+// and only bends its luminance, so at 18% the picture looks like a photograph
+// taken in better light rather than a picture with a chart on top.
+//
+// Two pieces, split by how often they change:
+//   FIELD IMAGE — one greyscale pixel per TILE, cached per (hole, profile).
+//     Drawn scaled with smoothing on, which is the bilinear upscale: `V` is a
+//     coarse field and a coarse field drawn sharp looks like a mosaic.
+//   BEAM — recomputed per frame, because it follows the aim. Cheap: it is a
+//     path, and the field image is clipped to it.
+
+/** How far from neutral grey the field image is allowed to swing. */
+export const CONE_SWING = 96;
+/** The alpha the cone is composited at. Above about a fifth it stops reading
+ *  as light and starts reading as a chart. */
+export const CONE_ALPHA = 0.18;
+
+/**
+ * The greyscale cost image: one pixel per tile, 128 where the ground is
+ * averagely expensive, lighter where it is cheap, darker where it is dear.
+ *
+ * Normalised against the field's own spread rather than an absolute scale, so
+ * a 500-yard par 5 and a 150-yard par 3 both use the full range — the question
+ * the cone answers is "which of the ground in front of me is better", and that
+ * is a relative question.
+ *
+ * @param {import('../engine/course.js').Course} course
+ * @param {Float64Array|Array<number>} V the expected-strokes field
+ * @returns {HTMLCanvasElement} `course.width` x `course.height` pixels
+ */
+export function renderCostImage(course, V, opts = {}) {
+  const c = document.createElement('canvas');
+  c.width = course.width;
+  c.height = course.height;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(course.width, course.height);
+  const shades = costShades(course, V, opts);
+  for (let i = 0; i < shades.length; i++) {
+    const o = i * 4;
+    img.data[o] = shades[i];
+    img.data[o + 1] = shades[i];
+    img.data[o + 2] = shades[i];
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+/**
+ * The greyscale itself, as plain numbers — one byte per tile, in row-major
+ * order. Split out from the canvas so the arithmetic that decides what is lit
+ * and what is shadowed can be tested without a DOM.
+ *
+ * @returns {Uint8ClampedArray} `course.width * course.height` shades
+ */
+export function costShades(course, V, { from = null, reach = Infinity } = {}) {
+  const out = new Uint8ClampedArray(course.width * course.height).fill(128);
+
+  // Normalised over THE GROUND THIS SWING CAN REACH, not over the whole hole.
+  // Normalising globally was the first version and it made the cone useless:
+  // a 400-yard hole spans four strokes of expectation end to end, so the two
+  // or three tenths that separate the good half of a landing zone from the bad
+  // half compressed into a single shade and the beam lit up uniformly. The
+  // cone's question is "which of the ground in front of me is better", and the
+  // answer has to be scaled to the ground in front of you.
+  //
+  // Percentile bounds, not min/max: one unreachable tile priced at a penalty
+  // would otherwise flatten everything else back to grey.
+  const finite = [];
+  for (let y = 0; y < course.height; y++) {
+    for (let x = 0; x < course.width; x++) {
+      const v = V[y * course.width + x];
+      if (!Number.isFinite(v)) continue;
+      if (from && Math.hypot(x - from.x, y - from.y) > reach + 2) continue;
+      finite.push(v);
+    }
+  }
+  if (finite.length < 4) return out;
+  finite.sort((a, b) => a - b);
+  const lo = finite[Math.floor(finite.length * 0.08)];
+  const hi = finite[Math.floor(finite.length * 0.88)];
+  const span = Math.max(0.12, hi - lo);
+
+  for (let i = 0; i < out.length; i++) {
+    const v = Number.isFinite(V[i]) ? V[i] : hi;
+    // 0 at the cheapest ground, 1 at the dearest
+    const t = Math.max(0, Math.min(1, (v - lo) / span));
+    // ease so the middle stays near neutral and the extremes carry the signal:
+    // a linear ramp tints everything and distinguishes nothing
+    const e = t * t * (3 - 2 * t);
+    out[i] = Math.round(128 + CONE_SWING * (0.5 - e));
+  }
+  return out;
+}
+
+/**
+ * The beam: the ground this swing could actually reach, as a path in WORLD
+ * pixels. Widens with the real lateral sigma at each distance — so it flares
+ * the way dispersion actually flares, superlinearly, rather than as a straight
+ * wedge — and is capped just past the target by the depth sigma.
+ *
+ * `bend` displaces the centre line progressively, which is how a putt's cone
+ * follows the break instead of pointing at where the ball is aimed.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{x,y}} from ball, in tiles
+ * @param {{x,y}} target aim point, in tiles
+ * @param {(t: number) => {long: number, lat: number}} sigmaAt sigma at a
+ *   fraction `t` of the way to the target
+ * @param {{x: number, y: number}} [bend] total lateral drift at the target
+ * @param {number} [k] how many sigma wide
+ */
+export function coneBeamPath(ctx, from, target, sigmaAt, bend = { x: 0, y: 0 }, k = 2.1) {
+  const dx = target.x - from.x;
+  const dy = target.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return false;
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+  const STEPS = 18;
+  const left = [];
+  const right = [];
+  for (let i = 0; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const s = sigmaAt(t);
+    // the beam starts at a point and opens: at the ball there is no spread yet
+    const w = k * s.lat * Math.min(1, 0.12 + t * 1.1);
+    // break accumulates with the SQUARE of progress — a putt barely moves in
+    // its first foot and does most of its bending as it dies
+    const b = t * t;
+    const cx = from.x + ux * len * t + bend.x * b;
+    const cy = from.y + uy * len * t + bend.y * b;
+    left.push([(cx + nx * w + 0.5) * TILE, (cy + ny * w + 0.5) * TILE]);
+    right.push([(cx - nx * w + 0.5) * TILE, (cy - ny * w + 0.5) * TILE]);
+  }
+  // and a rounded cap `k` depth-sigma past the target, because coming up short
+  // and running through are both real
+  const endSig = sigmaAt(1);
+  const cap = k * endSig.long;
+  const ex = from.x + ux * len + bend.x;
+  const ey = from.y + uy * len + bend.y;
+  ctx.beginPath();
+  ctx.moveTo(left[0][0], left[0][1]);
+  for (const p of left) ctx.lineTo(p[0], p[1]);
+  ctx.ellipse((ex + 0.5) * TILE, (ey + 0.5) * TILE,
+    cap * TILE, k * endSig.lat * TILE, Math.atan2(uy, ux), -Math.PI / 2, Math.PI / 2);
+  for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i][0], right[i][1]);
+  ctx.closePath();
+  return true;
 }

@@ -8,9 +8,13 @@
 <link rel="stylesheet" href="styles/system.css">
 <style>
   #grid { --card-min: 220px; gap: var(--sp-2); }
+  #grid.greens { --card-min: 300px; }
+  #grid.strategy { --card-min: 340px; }
   .cell { background: var(--panel); border-radius: 8px; padding: 6px; }
   .cell canvas { width: 100%; border-radius: 4px; cursor: pointer; }
   .cell .meta { margin-top: 4px; font-size: 11px; }
+  .green-cell .meta { line-height: 1.45; }
+  .green-cell .dim { opacity: 0.62; }
 </style>
 </head>
 <body>
@@ -29,8 +33,13 @@
   </nav>
 </header>
 <h1>Generator Audit</h1>
-<div class="sub">Fifty seeds at a glance — a fast check for blandness or broken layouts. Click any hole to play it.</div>
+<div class="sub">Fifty seeds at a glance — a fast check for blandness or broken layouts. Click any hole to play it. Switch to <b>Greens</b> for a sheet of twenty-four green complexes at putting resolution, or <b>Strategy</b> to see release D's carry bands, lay-ups and shelves drawn over the routing.</div>
 <div id="controls" class="panel bar">
+  <select id="mode">
+    <option value="courses" selected>Courses (50)</option>
+    <option value="greens">Greens (24)</option>
+    <option value="strategy">Strategy (24)</option>
+  </select>
   <select id="biome">
     <option value="classic" selected>classic</option>
     <option value="winter">winter</option>

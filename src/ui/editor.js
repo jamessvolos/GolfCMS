@@ -42,7 +42,59 @@ function invalidate() {
   document.getElementById('play').disabled = true;
 }
 
+// --- the aerial underlay -----------------------------------------------------
+// The first step toward playing real holes. A local image — a satellite or
+// drone capture the user already has — draws UNDER the tile grid, and the
+// ground fades to a translucent tracing layer over it. Paint what you see,
+// certify, share. Two rules keep it honest:
+//   THE TILES ARE STILL THE TRUTH. The engine scores the mask, not the photo.
+//   Tracing is exactly the act of making the two agree.
+//   THE IMAGE NEVER LEAVES THE MACHINE. It is session-state, not course data:
+//   a shared URL carries seed + patch, so redistribution of imagery — the
+//   entire licensing question — never arises.
+let underlay = null; // {img, dx, dy, dw, dh} cover-fitted to the board
+let traceAlpha = 0.45;
+
+function fitUnderlay(img) {
+  const k = Math.max(canvas.width / img.width, canvas.height / img.height);
+  const dw = img.width * k;
+  const dh = img.height * k;
+  return { img, dw, dh, dx: (canvas.width - dw) / 2, dy: (canvas.height - dh) / 2 };
+}
+
+document.getElementById('underlay').addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    underlay = fitUnderlay(img);
+    document.getElementById('tracectl').hidden = false;
+    document.getElementById('clearUnderlay').hidden = false;
+    document.getElementById('underlayNote').textContent =
+      'tracing: the photo is under the ground — paint the terrain you see';
+    draw();
+  };
+  img.src = URL.createObjectURL(file);
+});
+document.getElementById('traceAlpha').addEventListener('input', (e) => {
+  traceAlpha = Number(e.target.value) / 100;
+  draw();
+});
+document.getElementById('clearUnderlay').addEventListener('click', () => {
+  underlay = null;
+  document.getElementById('underlay').value = '';
+  document.getElementById('tracectl').hidden = true;
+  document.getElementById('clearUnderlay').hidden = true;
+  document.getElementById('underlayNote').textContent = '';
+  draw();
+});
+
 function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (underlay) {
+    ctx.drawImage(underlay.img, underlay.dx, underlay.dy, underlay.dw, underlay.dh);
+    ctx.globalAlpha = traceAlpha;
+  }
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
       const t = cellAt(course, x, y);
@@ -66,6 +118,9 @@ function draw() {
       }
     }
   }
+  // tee and cup punch through the tracing alpha: they are the two facts a
+  // trace is anchored to, so they never fade with the ground
+  ctx.globalAlpha = 1;
   ctx.fillStyle = '#fff';
   ctx.fillRect(course.tee.x * TILE + 6, course.tee.y * TILE + 6, 12, 12);
   ctx.fillStyle = '#e74c3c';

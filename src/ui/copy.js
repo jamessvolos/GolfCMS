@@ -13,17 +13,26 @@ export const copy = {
 
   // ---- status strip ----
   loadingHole: (n, count) => `Hole ${n} of ${count} — reading it now…`,
-  holeMeta: ({ course, label, n, count, par, yds, arch, wind }) =>
-    `${course} · ${label} · Hole ${n} of ${count} · Par ${par} · ${yds} yds · ${arch}${wind}`,
+  holeMeta: ({ course, label, n, count, par, yds, arch, wind, green }) =>
+    `${course} · ${label} · Hole ${n} of ${count} · Par ${par} · ${yds} yds · ${arch}${wind}`
+    + (green ?? ''),
+  /** The green the hole finishes on, the way a caddie hands you the book:
+   *  "· punchbowl green, pin middle bowl". */
+  greenNote: (archetype, pinName) =>
+    ` · ${archetype} green` + (pinName ? `, pin ${pinName}` : ''),
   wind: (mag, dir) => ` · wind ${mag} ${dir}`,
   scoreLine: (shot, pts) => `Shot ${shot} · ${pts} pts`,
 
   // ---- aiming ----
-  firstAim: (yds) =>
-    `${yds} yds to the pin. Move to aim — the ellipse is everywhere this shot can finish. Click the course (or tap Hit it) to play it.`,
-  nextShot: (shot, yds) => `${yds} yds in. Shot ${shot} — pick your target from this lie.`,
-  aimReadout: ({ carry, club, leaves, atFlag }) =>
-    `${carry}-yd carry, ${club}` + (atFlag ? ' — going at the flag.' : ` · leaves ${leaves} yds.`),
+  // One short line. The tutorial teaches the mechanics once; repeating them
+  // under every shot was most of why the box crowded the bottom of the screen.
+  firstAim: (yds) => `${yds} yds. Pick your target.`,
+  nextShot: (shot, yds) => `${yds} yds in. Pick your target.`,
+  // `plays` is the elevation-adjusted number when the land moves it: the
+  // caddie's own "165 yds — plays 178".
+  aimReadout: ({ carry, club, leaves, atFlag, plays }) =>
+    `${carry}y` + (plays ? ` · plays ${plays}` : '') + ` · ${club}`
+    + (atFlag ? ' · at the flag' : ` · leaves ${leaves}`),
   patternLine: ({ w, l, pct, medianLeave }) => {
     const parts = [];
     if (pct.green) parts.push(`<span class="fw">${pct.green}% green</span>`);
@@ -32,14 +41,14 @@ export const copy = {
     if (pct.sand) parts.push(`${pct.sand}% sand`);
     if (pct.trees) parts.push(`${pct.trees}% trees`);
     if (pct.wet) parts.push(`<span class="wet">${pct.wet}% water/OB</span>`);
-    return `Lands inside ${w} × ${l} yds · ${parts.join(' · ')}` +
-      (medianLeave !== null ? ` · median leave ${medianLeave} yds` : '');
+    return `${w}×${l} yds · ${parts.join(' · ')}` +
+      (medianLeave !== null ? ` · leave ~${medianLeave}` : '');
   },
   proPattern: 'Pro mode — no odds, no dots. Your read against the reveal. 🧠',
 
   // ---- putting ----
   // Same voice on the green: say the footage, then the pace, then nothing.
-  puttFirst: (ft) => `On the dance floor — a ${ft}-footer. Aim your pace; the ball rolls the line you set.`,
+  puttFirst: (ft) => `A ${ft}-footer. Aim your pace.`,
   puttNext: (n, ft) => `Putt ${n}: a ${ft}-footer left. Pick your pace.`,
   /** Pace call for `ft` feet past (+) or short (−) of the cup. */
   paceCall: (ft) => {
@@ -48,22 +57,22 @@ export const copy = {
     const mag = Math.abs(ft) < 2 ? `${Math.abs(inches)} inches` : `${Math.round(Math.abs(ft))} feet`;
     return ft > 0 ? `${mag} of pace past the cup` : `${mag} short of the cup`;
   },
-  puttAim: ({ ft, pace, make }) => `${ft}-footer, playing ${pace} — ${make}% to drop.`,
+  puttAim: ({ ft, pace, make }) => `${ft} ft · ${pace} · ${make}% to drop.`,
   /** Break call when slope bends the current line. `cups` is break in cup-widths. */
   puttBreakNote: (side, cups) =>
     cups < 1
       ? ` Breaks ${side} edge — hold your line.`
       : ` Breaks ${side} — play ${cups === 1 ? 'a cup' : `${cups} cups`} out.`,
   puttPatternLine: ({ make, three, leave }) =>
-    `<span class="fw">${make}% make</span> · ${three}% three-putt risk` +
-    (leave !== null ? ` · a miss leaves ${leave} ft` : ''),
+    `<span class="fw">${make}% make</span> · ${three}% 3-putt` +
+    (leave !== null ? ` · miss leaves ~${leave} ft` : ''),
   puttVerdictCall: (sg) =>
     sg < 0.02 ? 'Caddie-approved — perfect pace.'
     : sg < 0.08 ? 'Good read — a hair off the best pace.'
     : sg < 0.2 ? 'Playable, but the pace gave a little away.'
     : 'Costly — that pace burns putts.',
   puttVerdictLine: ({ call, pace, points, result }) =>
-    `${call} The caddie's read: ${pace} · +${points} pts · ${result}`,
+    `Caddie's read: ${pace} · ${result}`,
   puttResult: {
     holed: 'center cup — it drops! ⛳',
     left: (ft) => `stays out — a ${ft}-footer left`,
@@ -81,14 +90,13 @@ export const copy = {
     : sg < 0.08 ? 'Good call — a whisker off the best line.'
     : sg < 0.2 ? 'Playable, but there was a better line.'
     : 'Costly — that target gives strokes away.',
-  // Reveal line: name what the map means, then the caddie's line, then stop.
-  // The E-vs-E detail lives on the stamp chip — never say it twice.
+  // Reveal line. The STAMP owns the verdict and the chip owns the numbers, so
+  // this says only what neither does: where the caddie's line was and where
+  // the ball is. Saying the call twice was the crowding.
   verdictLine: ({ call, optCarry, sg, points, ballNow }) =>
-    `${call} The map grades every aim — green smart, red costly. The ring: ` +
-    `the caddie's ${optCarry}-yd line · +${points} pts · ${ballNow}`,
+    `The ring is the caddie's ${optCarry}-yd line · ${ballNow}`,
   riskLedger: (yours, caddies) =>
-    `Risk: your line ran <span class="wet">${yours}%</span> trouble (water/sand/trees) · ` +
-    `the caddie's held <span class="fw">${caddies}%</span>.`,
+    `trouble: yours <span class="wet">${yours}%</span> · caddie <span class="fw">${caddies}%</span>`,
   ballOut: (yds) => `ball ${yds} yds out`,
   outcome: {
     landed: 'landed',
@@ -147,8 +155,9 @@ export const copy = {
   onboardingStep: (n, total) => `Step ${n} of ${total}`,
   onboarding: [
     { title: 'Aim the ellipse', body: 'Move the mouse — or drag a finger — and the ellipse follows. That is your shot pattern: the ball can finish anywhere inside it.' },
+    { title: 'Read the light', body: 'The beam ahead of your ball is the caddie\u2019s honest read: lit ground costs fewer strokes from there, shadowed ground costs more. It only shows where this swing can reach \u2014 and it goes dark in Pro mode.' },
     { title: 'Commit the shot', body: 'Click the course (or tap Hit it) when you like the shape. The ball flies to one spot from your pattern — then the caddie shows the line they would have picked.' },
-    { title: 'Keep score', body: 'Every target is scored against the caddie’s best line — up to 1,000 points a hole. Closer call, bigger score.' },
+    { title: 'Keep score', body: 'After the shot, the map grades every aim — green smart, red costly — and your target is scored against the caddie’s best line, up to 1,000 points a hole.' },
   ],
   onboardingNext: 'Next',
   onboardingPlay: "Let's play",

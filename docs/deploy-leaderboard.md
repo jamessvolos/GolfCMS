@@ -77,10 +77,20 @@ localStorage.setItem('golfcms.leaderboard.url', 'https://your-server.example');
 or in the Caddie cockpit: **My game → Leaderboard URL → Apply my pattern**.
 The field reads and writes the same `golfcms.leaderboard.url` key.
 
-- **Arcade** (`arcade.html`): fully wired — when you hole out, it silently
-  POSTs your ghost replay to `<url>/scores` and shows your rank. Failures are
-  silent; the game never depends on the server.
-- **Caddie** (the main game, `index.html`): stores the URL today, but does
-  not submit yet. Caddie rounds have no replay codec, and the leaderboard's
-  cheat-proofing is replay re-simulation — a Caddie submission format
-  (decision transcript + re-scoring) is scoreboard-v2 work.
+Both games are wired, and both are verified the same way: the client sends a
+record of what was *decided*, never a score, and the server recomputes the
+points by replaying those decisions through the real engine. A forged
+submission would have to be a sequence of targets that actually earns the
+total, which is just playing well.
+
+- **Arcade** (`arcade.html`): on holing out it silently POSTs your ghost replay
+  to `<url>/scores` and shows your rank.
+- **Caddie** (the main game, `index.html`): on finishing a round it POSTs the
+  decision transcript to `<url>/caddie-scores`, which `verifyCaddieRound()`
+  re-simulates hole by hole — every hole regenerated from the ROUND seed, so no
+  cherry-picked easy holes, and every aim re-scored. Boards are keyed by
+  `roundSeed/count/handicap`, so a tour pro and a 20-handicap are never ranked
+  against each other. Custom handicap profiles are not submittable: the board
+  only takes the four known ones.
+
+Failure is silent in both. The board is a bonus; the game never depends on it.

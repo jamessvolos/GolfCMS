@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { puttBreakDrift, samplePuttRoll, courseHasSlopes, CUP_R } from '../src/engine/dispersion.js';
+import { puttBreakDrift, samplePuttRoll, courseHasSlopes, captureAt } from '../src/engine/dispersion.js';
 import { strokesField, evaluatePutt, bestPutt, scorePuttDecision, puttStats } from '../src/engine/strategy.js';
 import { makeCourse, setCell } from '../src/engine/course.js';
 import { FAIRWAY, GREEN, SLOPE_N, SLOPE_S, SLOPE_E } from '../src/engine/terrain.js';
@@ -30,23 +30,25 @@ test('no-slope putts are byte-identical to the pre-break engine', () => {
   const c = greenCourse();
   assert.equal(courseHasSlopes(c), false);
   const V = strokesField(c);
-  const from = { x: 16.5, y: 12 };
-  const target = { x: 20.2, y: 12 };
-  // golden values captured from the engine BEFORE break existed — exact floats
-  assert.equal(evaluatePutt(c, V, from, target), 2.1038936893544165);
+  const from = { x: 19.2, y: 12 }; // a 38-ft putt, played 1.5 ft past the cup
+  const target = { x: 20.031, y: 12 };
+  // golden values, regenerated for the calibrated model (release W-A) — the
+  // point of the fixture is unchanged: a flat green takes the exact arithmetic
+  // it always did, with zero drift as the additive identity.
+  assert.equal(evaluatePutt(c, V, from, target), 2.0505070956483946);
   assert.deepEqual(bestPutt(c, V, from), {
     target: { x: 20, y: 12 },
-    value: 2.051957930302768,
+    value: 2.0232880147814285,
     past: 0,
   });
   assert.deepEqual(samplePuttRoll(c, from, target, 3), {
-    x: 19.812363154306237,
-    y: 11.949462024836766,
+    x: 19.97907676236533,
+    y: 11.991352254952092,
   });
   const st = puttStats(c, from, target);
-  assert.equal(st.makePct, 8);
-  assert.equal(st.threePct, 19);
-  assert.equal(st.medianLeave, 0.4285461553402309);
+  assert.equal(st.makePct, 4);
+  assert.equal(st.threePct, 9);
+  assert.equal(st.medianLeave, 0.06263580814315188);
   // and the drift itself is exactly zero on a flat course
   assert.deepEqual(puttBreakDrift(c, from, target), { x: 0, y: 0, cross: 0 });
 });
@@ -56,10 +58,10 @@ test('slope tiles far from the line leave the putt untouched', () => {
   for (let x = 8; x <= 10; x++) setCell(c, x, 20, SLOPE_N); // 8 tiles off the line
   assert.equal(courseHasSlopes(c), true);
   const V = strokesField(c);
-  const from = { x: 16.5, y: 12 };
-  const target = { x: 20.2, y: 12 };
+  const from = { x: 19.2, y: 12 };
+  const target = { x: 20.031, y: 12 };
   assert.equal(puttBreakDrift(c, from, target).cross, 0);
-  assert.equal(evaluatePutt(c, V, from, target), 2.1038936893544165);
+  assert.equal(evaluatePutt(c, V, from, target), 2.0505070956483946);
 });
 
 test('cross-slope drift moves the roll downhill; aligned slope adds no break', () => {
@@ -94,7 +96,7 @@ test('cross-slope drift moves the roll downhill; aligned slope adds no break', (
 test('the caddie plays the break: optimal aim moves upslope of the cup', () => {
   const c = slopedCourse(SLOPE_N); // downhill −y: the ball falls below the line
   const V = strokesField(c);
-  const from = { x: 16, y: 12 };
+  const from = { x: 18.2, y: 12 }; // an 86-ft putt across the slope band
   const best = bestPutt(c, V, from);
   assert.ok(best.target.y > c.hole.y + 0.03,
     `optimal aim sits upslope (+y) of the cup, got y=${best.target.y}`);
@@ -113,16 +115,17 @@ test('the caddie plays the break: optimal aim moves upslope of the cup', () => {
 });
 
 test('make-rate on breaking putts is lower than flat at the same distance', () => {
-  const from = { x: 18, y: 12 };
-  const target = { x: 20.15, y: 12 }; // cup line, holeable pace
+  const from = { x: 19.6, y: 12 }; // a 19-footer: squarely inside the make range
+  const target = { x: 20.031, y: 12 }; // cup line, holeable pace
   const flatMake = puttStats(greenCourse(), from, target).makePct;
   const c = greenCourse();
-  for (let y = 11; y <= 13; y++) setCell(c, 19, y, SLOPE_N); // one band across the line
+  for (let y = 11; y <= 13; y++) for (let x = 19; x <= 20; x++) setCell(c, x, y, SLOPE_N);
   const slopeMake = puttStats(c, from, target).makePct;
-  assert.ok(flatMake > 0, `flat 96-footer drops sometimes, got ${flatMake}%`);
+  assert.ok(flatMake > 8, `flat 19-footer drops about as often as the tour does, got ${flatMake}%`);
   assert.ok(slopeMake < flatMake,
     `break costs makes at the same distance: slope ${slopeMake}% < flat ${flatMake}%`);
-  // and the drift on this line is worth more than a cup — aim-off territory
+  // and the drift on this line is worth more than a cup — aim-off territory.
+  // The yardstick is the model's effective capture, not the drawn CUP_R.
   const drift = puttBreakDrift(c, from, target);
-  assert.ok(Math.abs(drift.cross) > CUP_R * 2);
+  assert.ok(Math.abs(drift.cross) > captureAt(0.4) * 2);
 });

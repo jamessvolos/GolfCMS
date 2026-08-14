@@ -29,8 +29,14 @@ test('dispersion is deterministic and widens with bad lies', () => {
   assert.ok(spreadY > spreadX, 'lateral error exceeds depth error — patterns are wide, not deep');
 });
 
-test('expected putts grow with distance and stay in [1, 3]', () => {
-  assert.equal(expectedPutts(0.3), 1);
+test('expected putts follow Broadie: 1.0 from a foot, 1.5 from 8 ft, 2.0 from 33 ft', () => {
+  const ft = (f) => expectedPutts(f / 48); // expectedPutts takes tiles
+  assert.equal(ft(1), 1);
+  assert.ok(Math.abs(ft(3) - 1.04) < 0.005, `3 ft: ${ft(3)}`);
+  assert.ok(Math.abs(ft(8) - 1.50) < 0.005, `8 ft: ${ft(8)}`);
+  assert.ok(Math.abs(ft(20) - 1.87) < 0.005, `20 ft: ${ft(20)}`);
+  assert.ok(Math.abs(ft(33) - 2.0) < 0.02, `33 ft: ${ft(33)}`);
+  assert.ok(Math.abs(ft(60) - 2.21) < 0.005, `60 ft: ${ft(60)}`);
   assert.ok(expectedPutts(5) > expectedPutts(2));
   assert.ok(expectedPutts(40) <= 3);
 });

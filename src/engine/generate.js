@@ -9,6 +9,9 @@ import {
   SLOPE_N, SLOPE_S, SLOPE_E, SLOPE_W,
 } from './terrain.js';
 import { makeCourse, inBounds, cellAt, setCell, dist } from './course.js';
+import { buildRelief } from './relief.js';
+import { applyGreenComplex } from './greens.js';
+import { applyStrategicPlan } from './strategic.js';
 
 export const GEN_VERSION = 1;
 
@@ -22,9 +25,15 @@ export const BIOMES = ['classic', 'winter', 'alpine', 'links'];
 /**
  * @param {number} seed
  * @param {string} [biome]
- * @param {{holeDistTiles?: number}} [opts] optional hole-length override
- *   (used by Caddie's par-3/4/5 holes). Omitting it reproduces the classic
- *   full-span hole byte-for-byte — draws happen in the same stream order.
+ * @param {{holeDistTiles?: number, legacyGreen?: boolean, strategic?: boolean}} [opts]
+ *   `holeDistTiles` is the hole-length override (used by Caddie's par-3/4/5
+ *   holes); omitting it reproduces the classic full-span routing byte-for-byte —
+ *   draws happen in the same stream order. `legacyGreen` keeps the pre-release-C
+ *   2.5-tile disc instead of a shaped green complex: the arcade's certified
+ *   puzzles ask for it so already-shared holes play exactly as recorded.
+ *   `strategic` runs release D's routing pass — the landing-zone hazard moves
+ *   onto the pin side, the corridor widens asymmetrically, a template is
+ *   chosen. Opt-in, so a course without it is byte-identical to release C's.
  * @returns {import('./course.js').Course}
  */
 export function generateCourse(seed, biome = 'classic', opts = null) {
@@ -113,7 +122,10 @@ export function generateCourse(seed, biome = 'classic', opts = null) {
     stampDisc(course, cx, cy, kind === WATER ? randInt(hazards, 2, 3) : randInt(hazards, 1, 2), kind);
   }
 
-  // Green: a disc around the hole, clearing any hazard that landed on it.
+  // Green: a disc around the hole, clearing any hazard that landed on it. Green
+  // architecture (below) replaces this footprint with a real shape — but the
+  // disc is stamped FIRST regardless, so the corridor guarantee and the height
+  // field are conditioned against exactly the ground they always were.
   stampDisc(course, hole.x, hole.y, 2.5, GREEN);
 
   // Corridor guarantee: the spine itself is always playable fairway, so a
@@ -127,6 +139,37 @@ export function generateCourse(seed, biome = 'classic', opts = null) {
   if (biome === 'winter') addIce(course);
   else if (biome === 'alpine') addSlopes(course);
   else if (biome === 'links') makeLinks(course);
+
+  // The strategy, if asked for: release D's routing pass. It runs on the
+  // finished classic layout and BEFORE the land and the green, because the
+  // height field should be shaped against the ground the player actually plays
+  // and the green wants the template's opinion. Opt-in — a course without the
+  // flag never enters this branch, so release C's seeds are untouched.
+  const strategy = opts?.strategic ? applyStrategicPlan(course, seed, { spine, controls }) : null;
+
+  // The land: relief draws from its OWN named substream and only ever reads the
+  // finished tile layout, so the height field of every classic seed is
+  // byte-identical to release B's — the regression contract, pinned in
+  // relief.test.js.
+  course.relief = buildRelief(course, seed);
+
+  // The green complex, LAST: its own named substreams, drawn after every layout
+  // draw above, reading the finished layout and the finished land. It replaces
+  // the disc's footprint with a real shaped green, its hazards by role, and its
+  // pin — so the fairway, trees and hazard blobs of an existing seed cannot move,
+  // only the ground of the complex itself. `legacyGreen` keeps the disc: the
+  // arcade's certified puzzles (puzzle.js) take that path, which is why
+  // golden.test.js stays byte-identical.
+  if (!opts?.legacyGreen) {
+    applyGreenComplex(course, seed, {
+      spine,
+      // What crosses the strategic seam is a REQUEST, never terrain: the
+      // archetype the template wants, and the flank the cup should sit on so
+      // that hugging the landing-zone hazard is what opens the angle.
+      prefer: strategy?.greenPrefer ?? null,
+      tuck: strategy ? { x: strategy.perp.x * strategy.tuckSide, y: strategy.perp.y * strategy.tuckSide } : null,
+    });
+  }
 
   return course;
 }

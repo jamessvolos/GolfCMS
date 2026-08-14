@@ -5,7 +5,7 @@
 
 import { cellAt, inBounds, dist } from '../engine/course.js';
 import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
-import { lieParams, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX, puttBreakDrift, CUP_R } from '../engine/dispersion.js';
+import { lieParams, lieParamsAt, shotPlaysLike, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX, puttBreakDrift, CUP_R } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, isHoleOver, scorePuttDecision, puttHeatmap, puttStats, onPuttingSurface } from '../engine/strategy.js';
 import { caddieHoleSeed, caddieHoleCourse, encodeCaddieRound } from '../engine/caddierec.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
@@ -14,7 +14,7 @@ import { courseName } from '../engine/namer.js';
 import { yards, feet, holeYards, parForTiles, clubName } from '../engine/yards.js';
 import {
   renderCourseArt, renderGreenBook, drawFlag, drawBall, drawPin, drawBallWorld,
-  legendFor, TILE,
+  legendFor, TILE, renderCostImage, coneBeamPath, CONE_ALPHA,
 } from './paint.js';
 import {
   makeCamera, worldToScreen, screenToWorld, worldTransform, courseCamera,
@@ -39,6 +39,7 @@ const modeSel = document.getElementById('mode');
 let round = null; // {seed, daily, holeIndex, holes: [{points, strokes}], totalPoints}
 let course = null;
 let V = null;
+let costImage = null; // release E: V as greyscale, one pixel per tile, cached per hole
 let ball = null;
 let strokes = 0;
 let decisions = [];
@@ -303,6 +304,58 @@ function zoomBounds() {
 
 const camBounds = () => ({ width: course?.width ?? 40, height: course?.height ?? 24, margin: 2 });
 
+// --- the arrival -----------------------------------------------------------
+// A new hole opens ON THE GREEN: the camera holds there with a title card —
+// name, number, par and yardage, what green and where the flag is cut — then
+// eases back down the fairway to the tee. Since release D the hole is worth
+// reading before the swing; this makes the game read it to you. Any input
+// skips straight to the tee framing, and reduced-motion never flies at all.
+let introTimer = 0;
+const holeCard = document.getElementById('holecard');
+const HOLE_CARD_MS = 1500;
+const INTRO_EASE_MS = 1300;
+
+function introCamera() {
+  if (!greenRect) return null;
+  const view = camView();
+  return frameRect(
+    { x0: greenRect.x0, y0: greenRect.y0, x1: greenRect.x1, y1: greenRect.y1 },
+    { ...view, ...visibleCanvasPx(), pad: 3.5, min: 1, max: 3.2 },
+  );
+}
+
+let cardHideTimer = 0;
+
+function showHoleCard({ kicker, title, sub }) {
+  if (!holeCard) return;
+  // A hide scheduled moments ago (loadHole's own cleanup, most often) must not
+  // fire into the card we are about to show — the first version lost every
+  // intro to exactly that stale timer, 450 ms after it began.
+  if (cardHideTimer) { clearTimeout(cardHideTimer); cardHideTimer = 0; }
+  holeCard.querySelector('.hc-kicker').textContent = kicker;
+  holeCard.querySelector('.hc-title').textContent = title;
+  holeCard.querySelector('.hc-sub').textContent = sub;
+  holeCard.hidden = false;
+  requestAnimationFrame(() => holeCard.classList.add('show'));
+}
+
+function hideHoleCard() {
+  if (!holeCard) return;
+  holeCard.classList.remove('show');
+  if (cardHideTimer) clearTimeout(cardHideTimer);
+  cardHideTimer = setTimeout(() => { cardHideTimer = 0; holeCard.hidden = true; }, 450);
+}
+
+/** End the intro early (first input) or on schedule: card away, camera home. */
+function endIntro({ instant = false } = {}) {
+  if (!introTimer) return;
+  clearTimeout(introTimer);
+  introTimer = 0;
+  hideHoleCard();
+  if (instant) applyCam(lieCamMode(), { instant: true });
+  else settleCam({ dur: INTRO_EASE_MS });
+}
+
 function cancelCamAnim() {
   if (camRaf) cancelAnimationFrame(camRaf);
   camRaf = 0;
@@ -450,6 +503,7 @@ function clearPushIn() {
 const SWEEP_MS = 600;
 let fx = null; // {stage:'flight'|'sweep', t0, p, from, to, dur}
 let fxRaf = 0;
+const MARKERS_MS = 520;
 
 function startShotFx(from, to, opts = {}) {
   cancelFx();
@@ -474,8 +528,15 @@ function fxTick() {
       fx.p = 0;
       showStamp();
     }
-  } else {
+  } else if (fx.stage === 'sweep') {
     fx.p = Math.min(1, el / SWEEP_MS);
+    if (fx.p >= 1) {
+      fx = { stage: 'markers', t0: performance.now(), p: 0 };
+    }
+  } else {
+    // markers: your pick lands first, the optimal answers it — the argument
+    // of the reveal played as a beat, not dumped as a diagram
+    fx.p = Math.min(1, el / MARKERS_MS);
     if (fx.p >= 1) fx = null;
   }
   refresh();
@@ -558,6 +619,8 @@ function loadHole() {
   phase = 'loading';
   cancelFx();
   cancelCamAnim(); // no ease may outlive the course it was framing
+  if (introTimer) { clearTimeout(introTimer); introTimer = 0; }
+  hideHoleCard();
   camPending = null;
   hideStamp();
   clearDanger();
@@ -573,6 +636,7 @@ function loadHole() {
     const lengthTiles = dist(course.tee, course.hole);
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
+    costImage = null;
     art = renderCourseArt(course);
     greenArt = null; // new hole, new green — rebuilt on the first putt
     greenRect = findGreenRect();
@@ -585,9 +649,27 @@ function loadHole() {
     puttPos = null;
     puttCount = 0;
     holedOut = false;
-    // a fresh hole opens on the framing its tee shot earns — new art, so there
-    // is nothing to ease from. (A short par 3 can open on the corridor.)
-    applyCam(lieCamMode(), { instant: true });
+    // a fresh hole opens with the ARRIVAL: camera on the green, title card up,
+    // then an ease back down the fairway to the framing the tee shot earns.
+    // Reduced motion (or a green the finder somehow missed) skips straight
+    // to the tee framing, exactly as before.
+    const intro = reducedMotion.matches ? null : introCamera();
+    if (intro) {
+      cancelCamAnim();
+      camera = intro;
+      showHoleCard({
+        kicker: `${courseName(round.seed)} · hole ${round.holeIndex + 1} of ${round.count}`,
+        title: `Par ${holeInfo.par} · ${holeInfo.yds} yds`,
+        sub: course.green ? copy.greenNote(course.green.archetype, course.pin?.name).replace(/^[\s·]+/, '') : '',
+      });
+      introTimer = setTimeout(() => {
+        introTimer = 0;
+        hideHoleCard();
+        settleCam({ dur: INTRO_EASE_MS });
+      }, HOLE_CARD_MS);
+    } else {
+      applyCam(lieCamMode(), { instant: true });
+    }
     phase = 'aim';
     const label = round.label ?? (round.daily ? copy.dailyLabel(dailyNumber()) : copy.roundLabel(round.seed));
     meta.textContent = copy.holeMeta({
@@ -595,6 +677,9 @@ function loadHole() {
       n: round.holeIndex + 1, count: round.count,
       par: holeInfo.par, yds: holeInfo.yds,
       arch: course.archetype, wind: windLabel(),
+      // release C: the hole's green complex has a shape and a hole location, and
+      // the caddie says both out loud
+      green: course.green ? copy.greenNote(course.green.archetype, course.pin?.name) : null,
     });
     verdict.textContent = copy.firstAim(yards(toPin(ball)));
     document.getElementById('pattern').textContent = '';
@@ -606,6 +691,7 @@ function loadHole() {
 function refresh() {
   const t0 = performance.now();
   drawBase();
+  if (phase === 'aim' && aimTarget) drawCone();
   if (phase === 'aim' && aimTarget) drawAim();
   if (phase === 'reveal' && reveal) drawReveal();
   const pts = decisions.reduce((s, d) => s + d.points, 0);
@@ -650,6 +736,63 @@ function drawBase() {
   else drawFlag(ctx, toScreen(course.hole));
   // during the flight comet the interpolated ball is the only ball on screen
   if (!(fx && fx.stage === 'flight')) paintBall(toScreen(putting && puttPos ? puttPos : ball));
+}
+
+/**
+ * THE EXPECTED-STROKES CONE.
+ *
+ * The caddie has always known what every tile on the hole costs — that is `V`,
+ * the field the entire scoring model is built on — and until now the only way
+ * to see it was the reveal heatmap, which arrives *after* the decision.
+ *
+ * This puts it in front of the player while they are still choosing, without
+ * turning the hole into a chart. The rules it obeys:
+ *
+ *   NO COLOUR, NO NUMBERS. Cheap ground is lit, expensive ground is in shadow.
+ *   `soft-light` at 18% bends the art's luminance and leaves its hue alone, so
+ *   the result reads as weather rather than as an overlay.
+ *   ONLY WHERE THE BALL COULD GO. The field is clipped to a dispersion-shaped
+ *   beam. Shading ground this swing cannot reach would be answering a question
+ *   nobody asked.
+ *   OFF IN PRO MODE, like every other aid — Pro is the judgment test.
+ */
+function drawCone() {
+  if (proMode || !V || !course) return;
+  const from = putting && puttPos ? puttPos : ball;
+  // The field image is normalised to what THIS swing can reach, so it is cached
+  // per lie rather than per hole — rebuilt when the ball moves, never per frame.
+  const key = `${from.x},${from.y},${putting ? 'p' : 's'}`;
+  if (!costImage || costImage.key !== key) {
+    const r = putting ? PUTT_MAX : reach(lieParamsAt(course, from.x, from.y), profile);
+    costImage = { key, canvas: renderCostImage(course, V, { from, reach: r }) };
+  }
+  const dist = Math.hypot(aimTarget.x - from.x, aimTarget.y - from.y);
+  if (dist < 0.4) return;
+
+  // sigma at a fraction of the way out, from the same functions the pattern
+  // ellipse and the engine use — a cone that flared differently from the real
+  // dispersion would be a lie told softly
+  const lie = putting ? null : lieParamsAt(course, from.x, from.y);
+  const sigmaAt = putting
+    ? (t) => puttSigmas(Math.max(0.05, dist * t), profile)
+    : (t) => sigmas(Math.max(0.05, dist * t), lie.sigmaScale, profile);
+  // ...and on a putt the beam follows the BREAK, because the ball does
+  const bend = putting ? puttBreakDrift(course, from, aimTarget) : { x: 0, y: 0 };
+
+  beginWorld();
+  ctx.save();
+  if (coneBeamPath(ctx, from, aimTarget, sigmaAt, bend)) {
+    ctx.clip();
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.globalAlpha = CONE_ALPHA;
+    // one pixel per tile, drawn across the whole board with smoothing on: the
+    // bilinear upscale is what stops a coarse field looking like a mosaic
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(costImage.canvas, 0, 0, course.width * TILE, course.height * TILE);
+  }
+  ctx.restore();
+  ctx.restore(); // beginWorld
 }
 
 function ellipsePath(from, target, sigmaScale, k, sig = null) {
@@ -704,7 +847,7 @@ function drawPuttAim() {
 
 function drawAim() {
   if (putting) return drawPuttAim();
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   beginWorld();
   ctx.setLineDash([5, 5]);
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
@@ -743,7 +886,12 @@ function drawAim() {
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = 'rgba(0,0,0,0.7)';
   ctx.lineWidth = 3;
-  const label = `${yards(carry)}y`;
+  const pl = shotPlaysLike(course, ball, aimTarget);
+  // the tag says what the shot MEASURES; the second line says what it PLAYS,
+  // and only appears when the land is actually worth a club
+  const label = Math.abs(pl.deltaYards) >= 2
+    ? `${yards(carry)}y · plays ${pl.playsYards}`
+    : `${yards(carry)}y`;
   ctx.strokeText(label, tp.x + 12, tp.y - 10);
   ctx.fillText(label, tp.x + 12, tp.y - 10);
   ctx.lineWidth = 1;
@@ -755,38 +903,85 @@ function drawReveal() {
     drawFlight();
     return;
   }
-  // stage 2: heatmap sweeps radially outward from the lie it was hit from
-  const sweep = fx && fx.stage === 'sweep' ? fx.p : 1;
+  // stage 2: heatmap sweeps radially outward from the lie it was hit from.
+  // The heat itself is one pixel per tile, upscaled with smoothing — the same
+  // bilinear trick as the cone — so the verdict field reads as gradients over
+  // the ground instead of as a mosaic of squares, and the sweep edge is a
+  // clean clipped circle instead of a popcorn of whole tiles.
+  const sweep = fx && fx.stage === 'sweep' ? fx.p : fx && fx.stage === 'flight' ? 0 : 1;
   const origin = reveal.from ?? ball;
-  const limit = sweep * (reveal.maxHeat ?? Infinity);
-  // heatmap: green = smart aim, red = stroke-burning aim
+  if (!reveal.heatCanvas) reveal.heatCanvas = buildHeatCanvas(reveal.heat, course);
   beginWorld();
-  const min = Math.min(...reveal.heat.map((c) => c.e));
-  for (const c of reveal.heat) {
-    if (sweep < 1 && Math.hypot(c.x - origin.x, c.y - origin.y) > limit) continue;
-    const badness = Math.min(1, (c.e - min) / 1.2);
-    ctx.fillStyle = `rgba(${Math.round(80 + 175 * badness)}, ${Math.round(200 - 140 * badness)}, 80, 0.30)`;
-    ctx.fillRect(c.x * TILE, c.y * TILE, TILE, TILE);
+  ctx.save();
+  if (sweep < 1) {
+    const limit = sweep * (reveal.maxHeat ?? 40) * TILE;
+    ctx.beginPath();
+    ctx.arc((origin.x + 0.5) * TILE, (origin.y + 0.5) * TILE, Math.max(1, limit), 0, Math.PI * 2);
+    ctx.clip();
   }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(reveal.heatCanvas, 0, 0, course.width * TILE, course.height * TILE);
   ctx.restore();
-  // your pick ✕
-  const { x: yx, y: yy } = toScreen(reveal.your);
-  ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(yx - 8, yy - 8); ctx.lineTo(yx + 8, yy + 8);
-  ctx.moveTo(yx + 8, yy - 8); ctx.lineTo(yx - 8, yy + 8);
-  ctx.stroke(); ctx.lineWidth = 1;
-  // optimal ★ (drawn as a ringed dot)
-  const { x: ox, y: oy } = toScreen(reveal.score.optimal);
-  ctx.strokeStyle = '#6fd08c'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = '#6fd08c';
-  ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
-  ctx.lineWidth = 1;
+  ctx.restore();
+  // the argument, in sequence: your pick lands, then the optimal answers it
+  const mk = fx && fx.stage === 'markers' ? fx.p : fx ? 0 : 1;
+  const yourT = Math.min(1, mk / 0.4);
+  const optT = Math.max(0, Math.min(1, (mk - 0.35) / 0.65));
+  if (yourT > 0) {
+    const { x: yx, y: yy } = toScreen(reveal.your);
+    const k = 1 + (1 - easeOutCubic(yourT)) * 1.6; // punches in from large
+    ctx.globalAlpha = yourT;
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(yx - 8 * k, yy - 8 * k); ctx.lineTo(yx + 8 * k, yy + 8 * k);
+    ctx.moveTo(yx + 8 * k, yy - 8 * k); ctx.lineTo(yx - 8 * k, yy + 8 * k);
+    ctx.stroke(); ctx.lineWidth = 1;
+    ctx.globalAlpha = 1;
+  }
+  if (optT > 0) {
+    const { x: ox, y: oy } = toScreen(reveal.score.optimal);
+    const e = easeOutCubic(optT);
+    ctx.globalAlpha = optT;
+    ctx.strokeStyle = '#6fd08c'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#6fd08c';
+    ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 1;
+    if (optT < 1) {
+      // a ripple that announces the answer, then gets out of the way
+      ctx.globalAlpha = (1 - e) * 0.8;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ox, oy, 9 + e * 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    ctx.globalAlpha = 1;
+  }
   // where the sampled ball actually went
   if (reveal.landing) paintBall(toScreen(reveal.landing));
   // the post-shot note now lands as the DOM stamp + glass chip (showStamp),
   // not the painted callout card
+}
+
+/** The reveal heat as pixels: one per tile, alpha baked in, drawn upscaled. */
+function buildHeatCanvas(heat, c) {
+  const cv = document.createElement('canvas');
+  cv.width = c.width;
+  cv.height = c.height;
+  const g = cv.getContext('2d');
+  const img = g.createImageData(c.width, c.height);
+  let min = Infinity;
+  for (const cell of heat) min = Math.min(min, cell.e);
+  for (const cell of heat) {
+    const badness = Math.min(1, (cell.e - min) / 1.2);
+    const o = (cell.y * c.width + cell.x) * 4;
+    img.data[o] = Math.round(80 + 175 * badness);
+    img.data[o + 1] = Math.round(200 - 140 * badness);
+    img.data[o + 2] = 80;
+    img.data[o + 3] = 82; // ~0.32, baked in so the upscale carries it
+  }
+  g.putImageData(img, 0, 0);
+  return cv;
 }
 
 function windLabel() {
@@ -800,7 +995,7 @@ function windLabel() {
 
 function setAim(pt) {
   if (putting) return setPuttAim(pt);
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   const d = Math.hypot(pt.x - ball.x, pt.y - ball.y);
   // clamp inside the ring by half a tile so rounding can't push the target
   // past maxDist (which the evaluator would price as unreachable)
@@ -816,9 +1011,12 @@ function setAim(pt) {
 function updateAimReadout(lie) {
   const carry = Math.hypot(aimTarget.x - ball.x, aimTarget.y - ball.y);
   const leaves = toPin(aimTarget);
+  // the land's own say in the number: uphill plays longer, downhill shorter
+  const pl = shotPlaysLike(course, ball, aimTarget);
   verdict.textContent = copy.aimReadout({
     carry: yards(carry), club: clubName(carry),
     leaves: yards(leaves), atFlag: !(leaves > 1.5),
+    plays: Math.abs(pl.deltaYards) >= 2 ? pl.playsYards : null,
   });
   const s = sigmas(carry, lie.sigmaScale, profile);
   const stats = patternStats(course, ball, aimTarget, lie.sigmaScale, profile);
@@ -901,7 +1099,7 @@ function eventCoursePoint(e) {
 /** Touch users get a sensible starting target to nudge from. */
 function initNeutralAim() {
   if (putting) return setPuttAim({ x: course.hole.x, y: course.hole.y });
-  const lie = lieParams(cellAt(course, ball.x, ball.y));
+  const lie = lieParamsAt(course, ball.x, ball.y);
   const d = toPin(ball);
   const f = Math.min(reach(lie, profile) * 0.7, Math.max(1, d)) / Math.max(d, 0.001);
   setAim({ x: ball.x + (course.hole.x - ball.x) * f, y: ball.y + (course.hole.y - ball.y) * f });
@@ -1010,6 +1208,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerdown', (e) => {
+  endIntro({ instant: true });
   if (e.pointerType !== 'touch') return;
   if (!touchMode) {
     touchMode = true;
@@ -1083,6 +1282,7 @@ canvas.addEventListener('wheel', (e) => {
 const PEEK_TAP_MS = 260;
 let peekDownAt = 0;
 window.addEventListener('keydown', (e) => {
+  endIntro({ instant: true });
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key.toLowerCase();
@@ -1155,6 +1355,7 @@ document.getElementById('custom-apply').addEventListener('click', () => {
     verdict.textContent = copy.recalibratingCustom;
     setTimeout(() => {
       V = strokesField(course, 6, profile);
+    costImage = null;
       verdict.textContent = copy.recalibratedCustom(yards(toPin(ball)));
       refresh();
     }, 30);
@@ -1169,7 +1370,7 @@ proBtn.addEventListener('click', () => {
   proBtn.classList.toggle('active', proMode);
   if (aimTarget && phase === 'aim') {
     if (putting) updatePuttReadout();
-    else updateAimReadout(lieParams(cellAt(course, ball.x, ball.y)));
+    else updateAimReadout(lieParamsAt(course, ball.x, ball.y));
   }
   refresh();
 });
@@ -1183,7 +1384,7 @@ document.getElementById('commit').addEventListener('click', advance);
 function commitDecision() {
   if (putting) return commitPutt();
   const from = { ...ball };
-  const lie = lieParams(cellAt(course, from.x, from.y));
+  const lie = lieParamsAt(course, from.x, from.y);
   const score = scoreDecision(course, V, from, aimTarget, profile);
   const heat = aimHeatmap(course, V, from, 1, profile);
   const land = sampleLanding(course, from, aimTarget, lie.sigmaScale, strokes, profile);
@@ -1571,6 +1772,7 @@ hcpSel.addEventListener('change', () => {
     verdict.textContent = copy.recalibratingHcp(profile.label.toLowerCase());
     setTimeout(() => {
       V = strokesField(course, 6, profile);
+    costImage = null;
       verdict.textContent = copy.recalibratedHcp(profile.label.toLowerCase(), yards(toPin(ball)));
       refresh();
     }, 30);
@@ -1609,6 +1811,7 @@ window.__caddie = {
     greenArt = null;
     greenRect = findGreenRect();
     V = strokesField(course, 6, profile);
+    costImage = null;
     if (putting) ensureGreenArt();
     refresh();
   },

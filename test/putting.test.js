@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   puttSigmas, puttPoints, puttHolesOut, samplePuttRoll, puttSkill,
-  CUP_R, PUTT_MAX, HANDICAPS,
+  CUP_R, PUTT_MAX, PUTT_OVERRUN, HANDICAPS, captureAt,
 } from '../src/engine/dispersion.js';
 import {
   strokesField, evaluatePutt, bestPutt, scorePuttDecision, puttsFrom,
@@ -49,29 +49,32 @@ test('puttSigmas invert the full-swing shape: pace error dominates line error', 
 
 test('holing model: line, reach, and the lip-out overrun gradient', () => {
   const cup = { x: 10, y: 10 };
-  const from = { x: 8, y: 10 };
-  // dead center, dying at the front door: drops
+  const from = { x: 8, y: 10 }; // a 2-tile (96 ft) putt
+  const cap = captureAt(2); // effective capture, inverted from the make curve
+  assert.ok(cap > 0 && cap < CUP_R, 'capture is inches, not the drawn cup');
+  // dead center, arriving at the front door: drops
   assert.ok(puttHolesOut(from, { x: 10, y: 10 }, cup));
-  // just past on a true line: drops
-  assert.ok(puttHolesOut(from, { x: 10.4, y: 10 }, cup));
+  // a foot and a half of pace on a true line: still drops
+  assert.ok(puttHolesOut(from, { x: 10 + PUTT_OVERRUN * 0.5, y: 10 }, cup));
   // dies short: stays out
   assert.ok(!puttHolesOut(from, { x: 9.7, y: 10 }, cup));
-  // online but raced way past the overrun cap: never drops
+  // online but running past the 3-ft overrun cap: never drops
+  assert.ok(!puttHolesOut(from, { x: 10 + PUTT_OVERRUN * 1.5, y: 10 }, cup));
   assert.ok(!puttHolesOut(from, { x: 13, y: 10 }, cup));
   // wide of the cup: stays out
-  assert.ok(!puttHolesOut(from, { x: 10.2, y: 10 + CUP_R * 4 }, cup));
+  assert.ok(!puttHolesOut(from, { x: 10, y: 10 + cap * 1.5 }, cup));
   // capture shrinks with speed: a borderline line miss drops at dead pace...
-  const off = CUP_R * 0.8;
-  assert.ok(puttHolesOut(from, { x: 10.01, y: 10 + off * (2.01 / 2) }, cup));
-  // ...but the same line lips out when it would run 2 tiles by
-  assert.ok(!puttHolesOut(from, { x: 12, y: 10 + off * (4 / 2) }, cup));
+  assert.ok(puttHolesOut(from, { x: 10, y: 10 + cap * 0.8 }, cup));
+  // ...but the same line lips out when it would run three feet by
+  assert.ok(!puttHolesOut(from, { x: 10 + PUTT_OVERRUN * 0.9, y: 10 + cap * 0.8 }, cup));
 });
 
 test('evaluatePutt is monotone: longer putts cost more expected putts', () => {
   const c = greenCourse();
   const V = strokesField(c);
   let prev = 0;
-  for (const ft of [3, 12, 30, 60, 120, 240]) {
+  // PUTT_MAX is now 2.5 tiles (120 ft) — the longest putt anyone actually has
+  for (const ft of [3, 12, 30, 60, 90, 115]) {
     const e = evaluatePutt(c, V, fromAt(c, ft), { x: c.hole.x, y: c.hole.y });
     assert.ok(Number.isFinite(e), `finite at ${ft}ft`);
     assert.ok(e > prev, `E grows with distance: ${ft}ft gave ${e}, prev ${prev}`);
@@ -81,7 +84,7 @@ test('evaluatePutt is monotone: longer putts cost more expected putts', () => {
   const best = (ft) => bestPutt(c, V, fromAt(c, ft)).value;
   assert.ok(best(3) <= best(30));
   assert.ok(best(30) < best(60));
-  assert.ok(best(60) < best(240));
+  assert.ok(best(60) < best(115));
 });
 
 test('make-rate sanity: 3-footers are near-automatic, 60-footers are not', () => {
@@ -92,23 +95,33 @@ test('make-rate sanity: 3-footers are near-automatic, 60-footers are not', () =>
   assert.ok(puttStats(c, fromAt(c, 3), three.target).makePct >= 90,
     'a well-played 3-footer drops >90% of the time');
   const sixty = bestPutt(c, V, fromAt(c, 60));
-  assert.ok(sixty.value > 1.7, `60-footer expected putts ${sixty.value} > 1.7`);
+  // Broadie: ~2.21 expected putts from 60 ft, and a 2% one-putt rate
+  assert.ok(sixty.value > 2.0 && sixty.value < 2.3, `60-footer expected putts ${sixty.value}`);
+  assert.ok(puttStats(c, fromAt(c, 60), sixty.target).makePct <= 6,
+    'a 60-footer is a lag, not a chance');
   // puttsFrom (the leave recursion) stays in [1, 3] and grows with distance
   assert.ok(puttsFrom(0.05) >= 1 && puttsFrom(0.05) < 1.05);
   assert.ok(puttsFrom(3) > puttsFrom(1));
   assert.ok(puttsFrom(PUTT_MAX) <= 3);
 });
 
-test('optimal pace sits at or slightly past the cup', () => {
+test('optimal pace is a golfer\'s pace: to the hole, never racing', () => {
   const c = greenCourse();
   const V = strokesField(c);
-  for (const ft of [12, 30, 60, 90]) {
+  // Inside the make range the caddie plays PAST the cup — a putt that dies
+  // at the front door cannot drop.
+  for (const ft of [3, 5, 6, 8]) {
     const b = bestPutt(c, V, fromAt(c, ft));
-    assert.ok(b.past >= -1e-9, `${ft}ft: caddie never dies it short (past=${b.past})`);
-    assert.ok(b.past <= 0.6, `${ft}ft: but never races it (past=${b.past} tiles)`);
-    // the target lies on the line through the cup, past it
-    const along = b.target.x - c.hole.x;
-    assert.ok(Math.abs(b.target.y - c.hole.y) < 1e-9 && along >= -1e-9);
+    assert.ok(b.past * FT > 0.4, `${ft}ft: plays it past the hole (past=${b.past * FT} ft)`);
+  }
+  // Across the whole range pace stays inside a foot short to two feet past —
+  // the old model's optimum was 16-31 ft past, which is why it holed everything.
+  for (const ft of [3, 12, 30, 60, 90]) {
+    const b = bestPutt(c, V, fromAt(c, ft));
+    assert.ok(b.past * FT >= -1.0, `${ft}ft: never leaves it short (past=${b.past * FT} ft)`);
+    assert.ok(b.past * FT <= 2.0, `${ft}ft: never races it (past=${b.past * FT} ft)`);
+    // the target lies on the line through the cup
+    assert.ok(Math.abs(b.target.y - c.hole.y) < 1e-9);
   }
 });
 
@@ -147,22 +160,23 @@ test('putt reach: green plus ~2 tiles of fringe, capped at PUTT_MAX', () => {
 
 test('putts that roll off the green are priced by the field, ponds by penalty', () => {
   const c = greenCourse();
-  // shrink the green so long overruns can leave it: green only x 18..22
+  // shrink the green so an overrun can leave it: green only x 18..20, cup at 19
   for (let y = 2; y <= 22; y++) for (let x = 6; x <= 34; x++) setCell(c, x, y, FAIRWAY);
-  for (let y = 8; y <= 16; y++) for (let x = 18; x <= 23; x++) setCell(c, x, y, GREEN);
+  for (let y = 8; y <= 16; y++) for (let x = 18; x <= 20; x++) setCell(c, x, y, GREEN);
+  c.hole = { x: 19, y: 12 };
   const V = strokesField(c);
-  const from = { x: 18.2, y: 12 };
-  // racing an 86-ft putt at the very back edge risks leaving the surface;
+  const from = { x: 18.1, y: 12 };
+  // racing a 43-ft putt 70 ft past risks leaving the surface entirely;
   // it must cost more than the caddie's measured pace
   const calm = bestPutt(c, V, from).value;
-  const raced = evaluatePutt(c, V, from, { x: 25, y: 12 });
+  const raced = evaluatePutt(c, V, from, { x: 20.5, y: 12 });
   assert.ok(Number.isFinite(raced) && raced > calm, `raced ${raced} > calm ${calm}`);
   // water behind the green makes racing strictly worse still
-  for (let y = 8; y <= 16; y++) for (let x = 24; x <= 27; x++) setCell(c, x, y, WATER);
+  for (let y = 8; y <= 16; y++) for (let x = 21; x <= 23; x++) setCell(c, x, y, WATER);
   const V2 = strokesField(c);
-  const racedWet = evaluatePutt(c, V2, from, { x: 25, y: 12 });
+  const racedWet = evaluatePutt(c, V2, from, { x: 20.5, y: 12 });
   assert.ok(racedWet > raced - 0.5, 'pond behind keeps racing expensive');
-  assert.ok(cellAt(c, 25, 12) === WATER);
+  assert.ok(cellAt(c, 21, 12) === WATER);
 });
 
 test('determinism: expectation math and the seeded roll reproduce exactly', () => {
