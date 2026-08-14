@@ -54,6 +54,80 @@ const INK = {
  * geometry several times (fill, lip, depth), and marching it once is both
  * faster and guarantees the layers register exactly.
  */
+// --- material texture --------------------------------------------------------
+// The shapes went organic; the fills were still flat poster colour. These are
+// procedural material passes: seamless value-noise tiles composited in
+// soft-light through the same contour paths the shapes are drawn with. Neutral
+// grey is a no-op in soft-light, so every texture is a modulation around 128 —
+// the palette stays the palette, the ground just stops being paint.
+// Fixed seeds, not per-course: texture is texture, and identical texture on
+// every hole is exactly how real turf behaves on real aerials.
+
+const noiseCache = new Map();
+
+/** Seamless value-noise tile: lattice noise, bilinear, indices wrapped. */
+function valueNoiseTile(seed, size = 128, cell = 16, swing = 60) {
+  const key = `${seed}:${size}:${cell}:${swing}`;
+  if (noiseCache.has(key)) return noiseCache.get(key);
+  const n = Math.max(2, Math.round(size / cell));
+  let st = (seed >>> 0) || 1;
+  const rnd = () => {
+    st ^= st << 13; st >>>= 0;
+    st ^= st >>> 17;
+    st ^= st << 5; st >>>= 0;
+    return st / 0xffffffff;
+  };
+  const lat = new Float32Array(n * n);
+  for (let i = 0; i < lat.length; i++) lat[i] = rnd() * 2 - 1;
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const g = c.getContext('2d');
+  const img = g.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    const ly = (y / size) * n;
+    const y0 = Math.floor(ly) % n;
+    const y1 = (y0 + 1) % n;
+    const fy = ly - Math.floor(ly);
+    const sy = fy * fy * (3 - 2 * fy);
+    for (let x = 0; x < size; x++) {
+      const lx = (x / size) * n;
+      const x0 = Math.floor(lx) % n;
+      const x1 = (x0 + 1) % n;
+      const fx = lx - Math.floor(lx);
+      const sx = fx * fx * (3 - 2 * fx);
+      const v =
+        lat[y0 * n + x0] * (1 - sx) * (1 - sy) + lat[y0 * n + x1] * sx * (1 - sy) +
+        lat[y1 * n + x0] * (1 - sx) * sy + lat[y1 * n + x1] * sx * sy;
+      const grey = Math.round(128 + swing * v);
+      const o = (y * size + x) * 4;
+      img.data[o] = grey;
+      img.data[o + 1] = grey;
+      img.data[o + 2] = grey;
+      img.data[o + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  noiseCache.set(key, c);
+  return c;
+}
+
+/** Composite noise layers through a clip path (or the whole canvas). */
+function paintMaterial(ctx, path, layers) {
+  ctx.save();
+  if (path) ctx.clip(path);
+  for (const { tile, alpha, mode = 'soft-light', scale = 1 } of layers) {
+    const pat = ctx.createPattern(tile, 'repeat');
+    if (!pat) continue;
+    try { pat.setTransform(new DOMMatrix().scale(scale)); } catch { /* coarse is fine */ }
+    ctx.globalCompositeOperation = mode;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = pat;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+  ctx.restore();
+}
+
 const pathCache = new WeakMap();
 function terrainPath(course, match, { grow = 0, name = 'ground', wobble } = {}) {
   let byKey = pathCache.get(course);
@@ -116,29 +190,24 @@ export function renderCourseArt(course) {
   // ground: rough with a coarse mottle so big areas don't read flat
   ctx.fillStyle = INK.roughBase;
   ctx.fillRect(0, 0, off.width, off.height);
-  // Mottle, quieter than it was: the old version dropped identical hard discs
-  // on a strict lattice, which read as leopard print once the terrain shapes
-  // went organic. Varied radii, lower alpha, and a hash that breaks the grid.
-  ctx.fillStyle = INK.roughDark;
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (cellAt(course, x, y) !== ROUGH) continue;
-      const h = (x * 2654435761 + y * 96557) >>> 8;
-      if (h % 5 !== 0) continue;
-      const r = TILE * (0.35 + (h % 97) / 97 * 0.35);
-      ctx.globalAlpha = 0.35 + (h % 53) / 53 * 0.3;
-      ctx.beginPath();
-      ctx.arc((x + 0.5) * TILE + ((h % 13) - 6), (y + 0.5) * TILE + ((h % 11) - 5), r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  ctx.globalAlpha = 1;
+  // The meadow: layered value noise over the whole ground instead of the old
+  // disc mottle — discs read as leopard print the moment the shapes went
+  // organic. Three octaves: broad colour drift, patchiness, blade-level nap.
+  paintMaterial(ctx, null, [
+    { tile: valueNoiseTile(11, 128, 48, 46), alpha: 0.5, scale: 3.4 },
+    { tile: valueNoiseTile(23, 128, 20, 52), alpha: 0.3, scale: 1.4 },
+    { tile: valueNoiseTile(37, 128, 6, 40), alpha: 0.22, scale: 0.8 },
+  ]);
 
   const is = (t) => (v) => v === t;
   // fringe halo under fairway+green ties the mown shapes together
   layer(ctx, course, (t) => t === FAIRWAY || t === GREEN, INK.fringe, { grow: 5, name: 'fringe' });
   layer(ctx, course, is(FAIRWAY), INK.fairway, { grow: 3, name: 'fairway' });
   stripes(ctx, course, is(FAIRWAY), 'rgba(255,255,255,0.07)', 34, { name: 'fairway' });
+  paintMaterial(ctx, terrainPath(course, is(FAIRWAY), { grow: 3, name: 'fairway' }), [
+    { tile: valueNoiseTile(41, 128, 14, 40), alpha: 0.2, scale: 1.2 },
+    { tile: valueNoiseTile(43, 128, 5, 34), alpha: 0.16, scale: 0.7 },
+  ]);
   layer(ctx, course, is(SAND), INK.sand, { grow: 2, shadow: 'rgba(60,40,10,0.45)', name: 'sand' });
   // bunker lip: the same contour stroked from inside, so the rim follows every
   // curve of the shape exactly instead of being a second, smaller shape
@@ -148,8 +217,15 @@ export function renderCourseArt(course) {
   ctx.lineWidth = 7;
   ctx.stroke(terrainPath(course, is(SAND), { grow: 2, name: 'sand' }));
   ctx.restore();
+  paintMaterial(ctx, terrainPath(course, is(SAND), { grow: 2, name: 'sand' }), [
+    { tile: valueNoiseTile(53, 128, 22, 36), alpha: 0.32, scale: 1.6 }, // raked drift
+    { tile: valueNoiseTile(59, 128, 3, 44), alpha: 0.26, scale: 0.5 },  // grain
+  ]);
   layer(ctx, course, is(WATER), INK.waterDeep, { grow: 2, shadow: 'rgba(10,30,60,0.5)', name: 'water' });
   layer(ctx, course, is(WATER), INK.water, { grow: -4, name: 'water' });
+  paintMaterial(ctx, terrainPath(course, is(WATER), { grow: 2, name: 'water' }), [
+    { tile: valueNoiseTile(61, 128, 34, 42), alpha: 0.35, scale: 2.2 }, // depth
+  ]);
   // shoreline: a bright hairline where water meets land
   ctx.save();
   ctx.strokeStyle = 'rgba(200,230,255,0.35)';
@@ -174,6 +250,9 @@ export function renderCourseArt(course) {
   layer(ctx, course, is(ICE), INK.ice, { grow: 2, shadow: 'rgba(120,180,200,0.4)', name: 'ice' });
   layer(ctx, course, is(GREEN), INK.green, { grow: 3, shadow: 'rgba(20,60,20,0.45)', name: 'green' });
   stripes(ctx, course, is(GREEN), 'rgba(255,255,255,0.09)', 16, { name: 'green', angleOffset: Math.PI / 4 });
+  paintMaterial(ctx, terrainPath(course, is(GREEN), { grow: 3, name: 'green' }), [
+    { tile: valueNoiseTile(67, 128, 4, 26), alpha: 0.14, scale: 0.6 },
+  ]);
   layer(ctx, course, (t) => !!slopeDir(t), INK.slope, { grow: 1, name: 'slope' });
   // slope arrows
   for (let y = 0; y < course.height; y++) {
