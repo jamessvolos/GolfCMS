@@ -21,6 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Run tests before publishing
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - name: Stamp the service-worker cache with this release
+        run: sed -i "s/__BUILD__/${GITHUB_SHA::7}/" sw.js
       - name: Publish to gh-pages
         run: |
           git config user.name "github-actions[bot]"
