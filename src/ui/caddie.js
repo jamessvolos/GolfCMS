@@ -503,6 +503,7 @@ function clearPushIn() {
 const SWEEP_MS = 600;
 let fx = null; // {stage:'flight'|'sweep', t0, p, from, to, dur}
 let fxRaf = 0;
+const MARKERS_MS = 520;
 
 function startShotFx(from, to, opts = {}) {
   cancelFx();
@@ -527,8 +528,15 @@ function fxTick() {
       fx.p = 0;
       showStamp();
     }
-  } else {
+  } else if (fx.stage === 'sweep') {
     fx.p = Math.min(1, el / SWEEP_MS);
+    if (fx.p >= 1) {
+      fx = { stage: 'markers', t0: performance.now(), p: 0 };
+    }
+  } else {
+    // markers: your pick lands first, the optimal answers it — the argument
+    // of the reveal played as a beat, not dumped as a diagram
+    fx.p = Math.min(1, el / MARKERS_MS);
     if (fx.p >= 1) fx = null;
   }
   refresh();
@@ -895,38 +903,85 @@ function drawReveal() {
     drawFlight();
     return;
   }
-  // stage 2: heatmap sweeps radially outward from the lie it was hit from
-  const sweep = fx && fx.stage === 'sweep' ? fx.p : 1;
+  // stage 2: heatmap sweeps radially outward from the lie it was hit from.
+  // The heat itself is one pixel per tile, upscaled with smoothing — the same
+  // bilinear trick as the cone — so the verdict field reads as gradients over
+  // the ground instead of as a mosaic of squares, and the sweep edge is a
+  // clean clipped circle instead of a popcorn of whole tiles.
+  const sweep = fx && fx.stage === 'sweep' ? fx.p : fx && fx.stage === 'flight' ? 0 : 1;
   const origin = reveal.from ?? ball;
-  const limit = sweep * (reveal.maxHeat ?? Infinity);
-  // heatmap: green = smart aim, red = stroke-burning aim
+  if (!reveal.heatCanvas) reveal.heatCanvas = buildHeatCanvas(reveal.heat, course);
   beginWorld();
-  const min = Math.min(...reveal.heat.map((c) => c.e));
-  for (const c of reveal.heat) {
-    if (sweep < 1 && Math.hypot(c.x - origin.x, c.y - origin.y) > limit) continue;
-    const badness = Math.min(1, (c.e - min) / 1.2);
-    ctx.fillStyle = `rgba(${Math.round(80 + 175 * badness)}, ${Math.round(200 - 140 * badness)}, 80, 0.30)`;
-    ctx.fillRect(c.x * TILE, c.y * TILE, TILE, TILE);
+  ctx.save();
+  if (sweep < 1) {
+    const limit = sweep * (reveal.maxHeat ?? 40) * TILE;
+    ctx.beginPath();
+    ctx.arc((origin.x + 0.5) * TILE, (origin.y + 0.5) * TILE, Math.max(1, limit), 0, Math.PI * 2);
+    ctx.clip();
   }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(reveal.heatCanvas, 0, 0, course.width * TILE, course.height * TILE);
   ctx.restore();
-  // your pick ✕
-  const { x: yx, y: yy } = toScreen(reveal.your);
-  ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(yx - 8, yy - 8); ctx.lineTo(yx + 8, yy + 8);
-  ctx.moveTo(yx + 8, yy - 8); ctx.lineTo(yx - 8, yy + 8);
-  ctx.stroke(); ctx.lineWidth = 1;
-  // optimal ★ (drawn as a ringed dot)
-  const { x: ox, y: oy } = toScreen(reveal.score.optimal);
-  ctx.strokeStyle = '#6fd08c'; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = '#6fd08c';
-  ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
-  ctx.lineWidth = 1;
+  ctx.restore();
+  // the argument, in sequence: your pick lands, then the optimal answers it
+  const mk = fx && fx.stage === 'markers' ? fx.p : fx ? 0 : 1;
+  const yourT = Math.min(1, mk / 0.4);
+  const optT = Math.max(0, Math.min(1, (mk - 0.35) / 0.65));
+  if (yourT > 0) {
+    const { x: yx, y: yy } = toScreen(reveal.your);
+    const k = 1 + (1 - easeOutCubic(yourT)) * 1.6; // punches in from large
+    ctx.globalAlpha = yourT;
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(yx - 8 * k, yy - 8 * k); ctx.lineTo(yx + 8 * k, yy + 8 * k);
+    ctx.moveTo(yx + 8 * k, yy - 8 * k); ctx.lineTo(yx - 8 * k, yy + 8 * k);
+    ctx.stroke(); ctx.lineWidth = 1;
+    ctx.globalAlpha = 1;
+  }
+  if (optT > 0) {
+    const { x: ox, y: oy } = toScreen(reveal.score.optimal);
+    const e = easeOutCubic(optT);
+    ctx.globalAlpha = optT;
+    ctx.strokeStyle = '#6fd08c'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#6fd08c';
+    ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 1;
+    if (optT < 1) {
+      // a ripple that announces the answer, then gets out of the way
+      ctx.globalAlpha = (1 - e) * 0.8;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(ox, oy, 9 + e * 16, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    ctx.globalAlpha = 1;
+  }
   // where the sampled ball actually went
   if (reveal.landing) paintBall(toScreen(reveal.landing));
   // the post-shot note now lands as the DOM stamp + glass chip (showStamp),
   // not the painted callout card
+}
+
+/** The reveal heat as pixels: one per tile, alpha baked in, drawn upscaled. */
+function buildHeatCanvas(heat, c) {
+  const cv = document.createElement('canvas');
+  cv.width = c.width;
+  cv.height = c.height;
+  const g = cv.getContext('2d');
+  const img = g.createImageData(c.width, c.height);
+  let min = Infinity;
+  for (const cell of heat) min = Math.min(min, cell.e);
+  for (const cell of heat) {
+    const badness = Math.min(1, (cell.e - min) / 1.2);
+    const o = (cell.y * c.width + cell.x) * 4;
+    img.data[o] = Math.round(80 + 175 * badness);
+    img.data[o + 1] = Math.round(200 - 140 * badness);
+    img.data[o + 2] = 80;
+    img.data[o + 3] = 82; // ~0.32, baked in so the upscale carries it
+  }
+  g.putImageData(img, 0, 0);
+  return cv;
 }
 
 function windLabel() {

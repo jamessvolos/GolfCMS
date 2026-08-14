@@ -197,26 +197,47 @@ export function renderCourseArt(course) {
   // mown ground before the canopies so trees keep their own shadows
   paintCourseRelief(ctx, course, off.width, off.height);
 
-  // tree canopies: clustered discs with seeded jitter, shadow, and highlight
+  // Trees, in PASSES rather than per tile: every cast shadow first, then every
+  // canopy body, then every highlight. Interleaved per-tile drawing put each
+  // tree's shadow ON TOP of its neighbour's canopy, so a stand of trees read
+  // as separate polka dots; layered, adjacent canopies fuse into woodland with
+  // one shared shadow edge. The shadows fall along the same light the
+  // hillshade answers to, not straight down.
+  const canopies = [];
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
       if (cellAt(course, x, y) !== TREES) continue;
       const j = ((x * 2654435761 + y * 40503) >>> 16) % 7;
-      const cx = (x + 0.5) * TILE + (j % 3) - 1;
-      const cy = (y + 0.5) * TILE + (j % 2) * 2 - 1;
-      const r = TILE * (0.52 + (j % 4) * 0.045);
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.35)';
-      ctx.shadowBlur = 6;
-      ctx.shadowOffsetY = 4;
-      ctx.fillStyle = INK.canopy;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-      ctx.fillStyle = INK.canopyLight;
-      ctx.beginPath(); ctx.arc(cx - r * 0.25, cy - r * 0.3, r * 0.55, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = INK.canopyDark;
-      ctx.beginPath(); ctx.arc(cx + r * 0.3, cy + r * 0.32, r * 0.4, 0, Math.PI * 2); ctx.fill();
+      canopies.push({
+        cx: (x + 0.5) * TILE + (j % 3) - 1,
+        cy: (y + 0.5) * TILE + (j % 2) * 2 - 1,
+        r: TILE * (0.52 + (j % 4) * 0.045),
+      });
     }
+  }
+  const sx = -LIGHT.x * 5; // the sun sits at LIGHT; shadows fall away from it
+  const sy = -LIGHT.y * 5;
+  ctx.fillStyle = 'rgba(10, 26, 14, 0.38)';
+  for (const c of canopies) {
+    ctx.beginPath();
+    ctx.arc(c.cx + sx, c.cy + sy, c.r * 1.04, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.fillStyle = INK.canopy;
+  for (const c of canopies) {
+    ctx.beginPath();
+    ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const c of canopies) {
+    ctx.fillStyle = INK.canopyLight;
+    ctx.beginPath();
+    ctx.arc(c.cx + LIGHT.x * c.r * 0.32, c.cy + LIGHT.y * c.r * 0.32, c.r * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = INK.canopyDark;
+    ctx.beginPath();
+    ctx.arc(c.cx - LIGHT.x * c.r * 0.36, c.cy - LIGHT.y * c.r * 0.36, c.r * 0.36, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // vignette: the property fades into the treeline
@@ -262,10 +283,14 @@ function paintCourseRelief(ctx, course, w, h) {
       const grade = (p.x * LIGHT.x + p.y * LIGHT.y) * FT_PER_PULL / FT_PER_TILE;
       const v = Math.max(-1, Math.min(1, grade / COURSE_SHADE_FULL));
       const o = (j * bw + i) * 4;
-      const grey = Math.round(128 + 110 * v);
-      img.data[o] = grey;
-      img.data[o + 1] = grey;
-      img.data[o + 2] = grey;
+      // Warm light, cool shade — not grey. In `overlay`, a channel above 128
+      // brightens and below darkens, so pushing red hardest on lit faces and
+      // letting blue linger in the shade grades the land like late sun instead
+      // of like a depth map. Neutral ground stays exactly 128: a flat hole is
+      // still untouched.
+      img.data[o] = Math.round(128 + 124 * v);
+      img.data[o + 1] = Math.round(128 + 106 * v);
+      img.data[o + 2] = Math.round(128 + (v > 0 ? 64 : 92) * v);
       img.data[o + 3] = 255;
     }
   }
@@ -479,12 +504,15 @@ function sampleSlope(f, x, y) {
 
 /** The green's blob silhouette, grown by `grow` world pixels — the same shape
  *  language renderCourseArt uses, so the two layers register exactly. */
-function greenSilhouette(path, course, grow, r) {
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (cellAt(course, x, y) !== GREEN) continue;
-      path.roundRect(x * TILE - grow, y * TILE - grow, TILE + grow * 2, TILE + grow * 2, r);
-    }
+function greenSilhouette(path, course, grow) {
+  // The same contour engine as the course view, on the same 'green' wobble
+  // stream — so the book's collar and the course's green are the SAME shape at
+  // two magnifications, not two approximations that disagree at the seam. The
+  // old corner-radius argument died with the tile blobs.
+  for (const loop of terrainLoops(course, (t) => t === GREEN, { grow, name: 'green', tilePx: TILE })) {
+    path.moveTo(loop[0][0], loop[0][1]);
+    for (let i = 1; i < loop.length; i++) path.lineTo(loop[i][0], loop[i][1]);
+    path.closePath();
   }
 }
 
@@ -755,15 +783,15 @@ export function renderGreenArt(course, rect, { breaks = 'lines' } = {}) {
   // Silhouettes. Each cut is a UNION of grown tile blobs, so its rim has to be
   // painted as the difference between two unions — stroking the path itself
   // would outline every tile inside the shape, not the shape.
-  const shape = (grow, r) => {
+  const shape = (grow) => {
     const p = new Path2D();
-    greenSilhouette(p, course, grow, r);
+    greenSilhouette(p, course, grow);
     return p;
   };
-  const collarLip = shape(COLLAR_GROW, 13);
-  const collar = shape(COLLAR_GROW - LIP, 13 - LIP);
-  const surfaceLip = shape(GREEN_GROW, 7);
-  const surface = shape(GREEN_GROW - LIP * 0.8, 7 - LIP * 0.8);
+  const collarLip = shape(COLLAR_GROW);
+  const collar = shape(COLLAR_GROW - LIP);
+  const surfaceLip = shape(GREEN_GROW);
+  const surface = shape(GREEN_GROW - LIP * 0.8);
 
   // --- collar / fringe: a shorter, cross-mown ring so the boundary reads -----
   ctx.fillStyle = GINK.collarRim;
@@ -1136,9 +1164,9 @@ function bookCanvas(geo) {
   return { off, ctx };
 }
 
-function silhouette(course, grow, r) {
+function silhouette(course, grow) {
   const p = new Path2D();
-  greenSilhouette(p, course, grow, r);
+  greenSilhouette(p, course, grow);
   return p;
 }
 
