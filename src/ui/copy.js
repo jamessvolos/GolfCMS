@@ -137,6 +137,22 @@ export const copy = {
     "Coach's notes — where the strokes went:\n" + worst.map((d) =>
       `· Hole ${d.hole}, shot ${d.shot}: −${d.sgLost.toFixed(2)} SG — you took ` +
       `${d.risk}% trouble where the caddie's line held ${d.caddieRisk}%.`).join('\n'),
+  /** The strokes-gained ledger by phase of the game — the line real SG apps
+   *  stop at, and the one that tells you what to practice. Only phases that
+   *  actually cost something are listed. */
+  coachPhases: (lost) => {
+    const names = { tee: 'off the tee', approach: 'approaches', putt: 'putting' };
+    const parts = Object.entries(lost)
+      .filter(([, v]) => v > 0.005)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${names[k]} −${v.toFixed(2)}`);
+    return parts.length ? `Your round in SG: ${parts.join(' · ')}.` : '';
+  },
+  phaseTip: (cat) => ({
+    tee: 'Biggest leak: tee shots. Favor the fat side — the caddie rarely flirts with the trouble line.',
+    approach: 'Biggest leak: approach targets. Aim at the middle-of-green E, not the flag.',
+    putt: 'Biggest leak: pace. Dying it at the cup beats racing it three feet past.',
+  }[cat] ?? ''),
 
   // ---- round labels ----
   dailyLabel: (n) => `Daily #${n}`,
@@ -149,7 +165,24 @@ export const copy = {
   shareRound: (seed) => `Caddie round ${seed}`,
   shareSquares: (holes) =>
     holes.map((h) => (h.points > 970 ? '🟩' : h.points > 900 ? '🟨' : '🟥')).join(''),
-  share: ({ label, total, max, squares }) => `${label} — ${total}/${max} ${squares}`,
+  /** The result line that travels: label, score, squares — and, when the game
+   *  is served over http(s), the link that lets the reader play the same
+   *  holes. Spoiler-free either way. */
+  share: ({ label, total, max, squares, url }) =>
+    `${label} — ${total}/${max} ${squares}` + (url ? `\n${url}` : ''),
+  copiedToast: 'Result copied — paste it anywhere.',
+  copyFailedToast: 'Couldn’t reach the clipboard — long-press to copy.',
+
+  // ---- the daily ritual: next tee time ----
+  nextDailyIn: (hms) => `Next daily hole in ${hms} · same hole, everyone on Earth.`,
+  quickFive: 'Quick 5',
+
+  // ---- first-reveal explainer (shown once, at the moment SG first appears) ----
+  sgExplainer:
+    'That chip is your bill. SG (strokes gained) is what your target cost ' +
+    'against the caddie’s best line — SG −0.30 gave up a third of a stroke. ' +
+    'E is expected strokes to hole out. Tap ? up top any time for the full key.',
+  sgExplainerOk: 'Got it',
 
   // ---- first-run onboarding (three cards, under fifteen seconds) ----
   onboardingStep: (n, total) => `Step ${n} of ${total}`,

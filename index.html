@@ -3,8 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="GeoGuessr for golf strategy: pick targets on a daily generated hole and get scored in strokes gained against the optimal caddie line.">
+<meta name="theme-color" content="#10241a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Caddie">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Caddie — the daily golf strategy game">
+<meta property="og:description" content="You don't swing — you pick targets. Every decision scored in strokes gained against the optimal line. New certified hole every day.">
+<meta property="og:url" content="https://jamessvolos.github.io/GolfCMS/">
+<meta property="og:image" content="https://jamessvolos.github.io/GolfCMS/icons/icon-512.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Caddie — the daily golf strategy game">
+<meta name="twitter:description" content="Pick targets, get scored in strokes gained. New certified hole every day.">
+<meta name="twitter:image" content="https://jamessvolos.github.io/GolfCMS/icons/icon-512.png">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🎯</text></svg>">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <title>Caddie — Play</title>
 <link rel="stylesheet" href="styles/system.css">
 <link rel="stylesheet" href="styles/cockpit.css">
@@ -30,7 +45,8 @@
     <div class="big"></div>
     <div class="sub"></div>
     <div id="coach" hidden></div>
-    <div class="bar"><button id="ov-share">Copy result</button><button id="ov-next" class="btn-primary">Next</button></div>
+    <div id="ov-countdown" hidden></div>
+    <div class="bar"><button id="ov-share">Copy result</button><button id="ov-quick" hidden>Quick 5</button><button id="ov-next" class="btn-primary">Next</button></div>
   </div>
 </div>
 
@@ -63,6 +79,16 @@
   <div id="hud-settings" class="glass">
     <button id="share" title="Copy your round result">Share</button>
     <button id="pro" title="Hide odds and dots — pure judgment">Pro</button>
+    <details id="help-pop">
+      <summary title="What do the numbers mean?" aria-label="What do the numbers mean?">?</summary>
+      <div class="menu glass" id="help-body">
+        <span class="menu-label">Reading the numbers</span>
+        <p><b>SG (strokes gained)</b> — how much your target cost against the caddie's best line. SG −0.30 means that aim gives up about a third of a stroke.</p>
+        <p><b>E</b> — expected strokes to hole out from here. "E 3.99 vs caddie 3.02" compares your line's forecast to the optimal one.</p>
+        <p><b>The ellipse</b> — your real dispersion: the ball lands somewhere inside it. Rough, sand and trees widen it.</p>
+        <p><b>The ring</b> — after each shot, the caddie's optimal target. Green ground on the reveal was smart, red was costly.</p>
+      </div>
+    </details>
     <label class="hcp">HCP <select id="handicap"></select></label>
     <details id="nav-more">
       <summary title="Career and workshop">☰</summary>
@@ -108,6 +134,15 @@
   <label>Driver distance <input id="c-dist" type="range" min="0.78" max="1.12" step="0.02" value="1"></label>
   <label>Leaderboard URL <input id="c-board" type="url" placeholder="https://… (optional)" spellcheck="false"></label>
   <button id="custom-apply">Apply my pattern</button>
+</div>
+
+<!-- one-line toast: clipboard + small confirmations -->
+<div id="toast" class="glass" hidden role="status" aria-live="polite"></div>
+
+<!-- first-reveal explainer: what SG means, shown once -->
+<div id="sg-explain" class="hud glass" hidden>
+  <p id="sg-explain-body"></p>
+  <button id="sg-explain-ok" class="btn-primary">Got it</button>
 </div>
 
 <div id="onboard" hidden>

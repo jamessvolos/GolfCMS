@@ -1,10 +1,17 @@
 // Caddie service worker: stale-while-revalidate for same-origin GETs, so the
 // whole trainer works offline after one visit (there is no content to
 // download — the generator IS the content).
-const CACHE = 'caddie-v1';
+// The deploy pipeline stamps __BUILD__ with the commit SHA so every release
+// gets its own cache and stale copies are swept on activate.
+const CACHE = 'caddie-__BUILD__';
 
 self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (e) =>
+  e.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  ));
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);

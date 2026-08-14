@@ -37,6 +37,7 @@ const topinEl = document.getElementById('topin');
 const modeSel = document.getElementById('mode');
 
 let round = null; // {seed, daily, holeIndex, holes: [{points, strokes}], totalPoints}
+let countdownTimer = null; // ticks the "next daily in…" clock on the round overlay
 let course = null;
 let V = null;
 let costImage = null; // release E: V as greyscale, one pixel per tile, cached per hole
@@ -585,6 +586,25 @@ function showStamp() {
   document.getElementById('stamp-chip').textContent = reveal.note.lines.slice(0, 2).join('  ·  ');
   stampEl.hidden = false;
   positionStamp();
+  explainSGOnce();
+}
+
+/** The moment SG first appears on screen is the moment to say what it means.
+ *  One card, once per device; the ? popover carries the full key after that. */
+function explainSGOnce() {
+  let seen = '1';
+  try { seen = localStorage.getItem('golfcms.sgseen.v1'); } catch { /* storage blocked */ }
+  if (seen) return;
+  const card = document.getElementById('sg-explain');
+  if (!card) return;
+  document.getElementById('sg-explain-body').textContent = copy.sgExplainer;
+  const ok = document.getElementById('sg-explain-ok');
+  ok.textContent = copy.sgExplainerOk;
+  card.hidden = false;
+  ok.addEventListener('click', () => {
+    card.hidden = true;
+    try { localStorage.setItem('golfcms.sgseen.v1', '1'); } catch { /* best-effort */ }
+  }, { once: true });
 }
 function positionStamp() {
   if (stampEl.hidden || !reveal) return;
@@ -1659,6 +1679,7 @@ function finishHole() {
     recap: decisions.map((d, i) => ({
       hole: round.holeIndex + 1, shot: i + 1, sgLost: d.sgLost,
       risk: d.yourRisk ?? 0, caddieRisk: d.caddieRisk ?? 0,
+      cat: d.putt ? 'putt' : i === 0 ? 'tee' : 'approach',
     })),
   });
   round.totalPoints += holePts;
@@ -1688,10 +1709,41 @@ function finishHole() {
   if (done) {
     const all = round.holes.flatMap((h) => h.recap ?? []);
     const worst = all.filter((d) => d.sgLost > 0.05).sort((a, b) => b.sgLost - a.sgLost).slice(0, 2);
-    coach.textContent = worst.length === 0 ? copy.coachClean : copy.coachNotes(worst);
+    // the phase ledger: where the round's strokes went, and the one habit to fix
+    const lost = { tee: 0, approach: 0, putt: 0 };
+    for (const d of all) {
+      if (d.cat && Number.isFinite(d.sgLost) && d.sgLost > 0) lost[d.cat] += d.sgLost;
+    }
+    const phases = copy.coachPhases(lost);
+    const worstCat = Object.entries(lost).sort((a, b) => b[1] - a[1])[0];
+    const tip = worstCat && worstCat[1] > 0.25 ? copy.phaseTip(worstCat[0]) : '';
+    const notes = worst.length === 0 ? copy.coachClean : copy.coachNotes(worst);
+    coach.textContent = [phases, notes, tip].filter(Boolean).join('\n');
     coach.hidden = false;
   } else {
     coach.hidden = true;
+  }
+  // the daily's closing beat: a ticking tee time for tomorrow's hole, and a
+  // Quick 5 for anyone not ready to put the bag down
+  const cd = document.getElementById('ov-countdown');
+  const quick = document.getElementById('ov-quick');
+  clearInterval(countdownTimer);
+  if (done && round.daily) {
+    const tick = () => {
+      const ms = 86400000 - (Date.now() % 86400000); // daily rolls at UTC midnight
+      const s = Math.floor(ms / 1000);
+      const hms = [s / 3600, (s / 60) % 60, s % 60]
+        .map((n) => String(Math.floor(n)).padStart(2, '0')).join(':');
+      cd.innerHTML = copy.nextDailyIn(`<b>${hms}</b>`);
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+    cd.hidden = false;
+    quick.textContent = copy.quickFive;
+    quick.hidden = false;
+  } else {
+    cd.hidden = true;
+    quick.hidden = true;
   }
   overlay.classList.add('show');
   if (done) submitRoundToBoard(round); // silent, optional, never blocks the UI
@@ -1732,14 +1784,57 @@ async function submitRoundToBoard(r) {
 function shareText() {
   const label = round.label ??
     (round.daily ? copy.shareDaily(dailyNumber()) : copy.shareRound(round.seed));
-  const text = copy.share({
+  // the link that lets the reader play the same holes — only when the game is
+  // actually served from a URL worth pasting (not file:, not about:)
+  let url = null;
+  if (/^https?:$/.test(location.protocol)) {
+    url = location.origin + location.pathname +
+      (round.daily ? '' : (round.hash ?? `#/round/${round.seed}`));
+  }
+  let text = copy.share({
     label, total: round.totalPoints, max: round.count * 1000,
     squares: copy.shareSquares(round.holes),
   });
-  return round.streak > 1 ? `${text} 🔥${round.streak}` : text;
+  if (round.streak > 1) text += ` 🔥${round.streak}`;
+  if (url) text += `\n${url}`;
+  return text;
+}
+
+/** Copy with a visible receipt: async clipboard first, the textarea trick as
+ *  fallback (plain-http and older WebViews), and a toast either way. */
+let toastTimer = null;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+}
+async function copyResult() {
+  const text = shareText();
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(copy.copiedToast);
+    return;
+  } catch { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    toast(ok ? copy.copiedToast : copy.copyFailedToast);
+  } catch {
+    toast(copy.copyFailedToast);
+  }
 }
 
 document.getElementById('ov-next').addEventListener('click', () => {
+  clearInterval(countdownTimer);
   if (round.holeIndex + 1 >= round.count) {
     startRound((Math.random() * 0xffffffff) >>> 0, false);
   } else {
@@ -1747,8 +1842,12 @@ document.getElementById('ov-next').addEventListener('click', () => {
     loadHole();
   }
 });
-document.getElementById('ov-share').addEventListener('click', () => navigator.clipboard?.writeText(shareText()));
-document.getElementById('share').addEventListener('click', () => navigator.clipboard?.writeText(shareText()));
+document.getElementById('ov-share').addEventListener('click', copyResult);
+document.getElementById('share').addEventListener('click', copyResult);
+document.getElementById('ov-quick').addEventListener('click', () => {
+  clearInterval(countdownTimer);
+  startRound((Math.random() * 0xffffffff) >>> 0, false);
+});
 const hcpSel = document.getElementById('handicap');
 for (const h of HANDICAPS) {
   const o = document.createElement('option');
@@ -1887,7 +1986,8 @@ try {
 
 const m = location.hash.match(/^#\/round\/(\d+)/);
 const mc = location.hash.match(/^#\/champ\/(\d+)/);
-if (location.hash.startsWith('#/major')) startMajor();
+// `#/gauntlet` is the weekly major's original, documented name — honor both
+if (location.hash.startsWith('#/major') || location.hash.startsWith('#/gauntlet')) startMajor();
 else if (mc) startChampionship(Number(mc[1]));
 else if (m) startRound(Number(m[1]) >>> 0, false);
 else startRound(dailySeed(), true);

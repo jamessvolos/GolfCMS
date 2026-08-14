@@ -378,6 +378,92 @@ body {
 }
 #overlay .btn-primary { background: var(--accent2); color: var(--bg); border-color: var(--accent2); font-weight: 700; }
 
+/* ---------- countdown to the next daily (inside the round overlay) ---------- */
+#ov-countdown {
+  font-size: 13px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4px;
+}
+#ov-countdown b { color: var(--ink); font-weight: 700; }
+
+/* ---------- toast: one calm line, bottom-center, above everything ---------- */
+#toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  z-index: 60;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  pointer-events: none;
+  animation: toast-in 200ms ease both;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ---------- the "?" glossary popover (rides in the settings strip) ---------- */
+#help-pop { position: relative; }
+#help-pop summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  font-weight: 700;
+}
+#help-pop summary::-webkit-details-marker { display: none; }
+#help-pop[open] summary { background: rgba(255, 255, 255, 0.2); }
+#help-pop .menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 15;
+  width: min(300px, calc(100vw - 32px));
+  padding: 12px 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dim);
+  text-align: left;
+  text-transform: none;
+  letter-spacing: normal;
+}
+#help-pop .menu p { margin: 8px 0 0; }
+#help-pop .menu b { color: var(--ink); }
+
+/* ---------- first-reveal SG explainer: one card, once ---------- */
+#sg-explain {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  z-index: 25;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+#sg-explain p { margin: 0; }
+#sg-explain button {
+  align-self: flex-end;
+  background: var(--accent2);
+  color: var(--bg);
+  border: none;
+  border-radius: 10px;
+  padding: 7px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* ---------- first-run onboarding, glassed ---------- */
 #onboard {
   position: fixed;
@@ -451,6 +537,37 @@ body {
   /* phones: the stamped word stands alone — its number chip duplicates the
      caddie line and score strip, and only ever half-fit behind them */
   #stamp-chip { display: none; }
+}
+
+/* ---------- phones: the two top HUD blocks must never collide. Cap the
+   yardage block's footprint and the ticker's lane so left + right always fit
+   inside the viewport with air between them. ---------- */
+@media (max-width: 480px) {
+  #hud-yardage { max-width: 38vw; }
+  #topin { font-size: clamp(44px, 13vw, 60px); }
+  /* the two top blocks + their 16px gutters must fit 100vw with air between */
+  #hud-ticker { max-width: calc(100vw - 38vw - 48px); }
+  #meta { font-size: 9px; letter-spacing: 0.6px; padding: 5px 8px; line-height: 1.5; }
+  #hud-settings { padding: 5px 6px; gap: 4px; }
+  #score { font-size: 11px; padding: 3px 9px; }
+  #cam-controls { flex-wrap: wrap; max-width: 40vw; }
+  #sg-explain, #toast { bottom: calc(170px + env(safe-area-inset-bottom)); }
+}
+
+/* ---------- touch devices: every control a real thumb target. Desktop keeps
+   its compact cockpit; coarse pointers get ≥44px hit areas. ---------- */
+@media (pointer: coarse) {
+  .hud button, .hud select, .hud summary, #overlay button {
+    min-height: 44px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  #cam-controls button, #hud-settings button, #nav-more summary, #help-pop summary {
+    min-height: 40px;
+    min-width: 40px;
+  }
+  #nav-more .menu a { padding: 8px 0; }
+  #hud-settings .hcp select { min-height: 40px; }
 }
 
 

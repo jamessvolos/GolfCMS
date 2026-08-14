@@ -104,7 +104,18 @@ npm test   # node --test: 90+ tests, ~5s
 ```
 
 The engine (`src/engine/`) is pure functions with no DOM imports; the UI
-(`src/ui/`) is a thin canvas interpreter. Golden-replay fixtures in
+(`src/ui/`) is a thin canvas interpreter.
+
+## Deploy
+
+The game is a static site and ships itself: every push to `main` runs the
+test suite and, if green, publishes the repo root to GitHub Pages
+(`.github/workflows/pages.yml`). The deploy stamps the service-worker cache
+name with the commit SHA, so installed clients sweep stale caches and pick
+up each release. Icons regenerate with `node scripts/make-icons.mjs` (zero
+dependencies — it hand-encodes the PNGs). The optional leaderboard service
+deploys separately via `Dockerfile` + `fly.toml` or `render.yaml`
+(see `docs/deploy-leaderboard.md`). Golden-replay fixtures in
 `test/golden.test.js` pin known seeds' exact behavior — any physics change
 that would alter an already-shared hole fails CI loudly.
 
