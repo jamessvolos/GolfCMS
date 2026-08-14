@@ -23,6 +23,8 @@ import { YARDS_PER_TILE } from '../engine/yards.js';
 
 export const TILE = 24;
 
+import { terrainLoops } from './contours.js';
+
 const INK = {
   roughBase: '#48793f',
   roughDark: '#3f6c38',
@@ -42,13 +44,33 @@ const INK = {
   slope: '#97b26e',
 };
 
-/** Rounded, slightly-enlarged cell rect — overlapping same-color blobs merge
- *  into organic shapes instead of a tile grid. */
-function blob(ctx, x, y, grow = 3, r = 7) {
-  ctx.roundRect(x * TILE - grow, y * TILE - grow, TILE + grow * 2, TILE + grow * 2, r);
+/**
+ * The smooth outline of a terrain class, as a Path2D. This is the whole art
+ * style change in one line: shapes come from `contours.js` — a smoothed field
+ * marched into organic closed curves — instead of a union of rounded tile
+ * rects. A bunker is a bunker now, not a plus-sign.
+ *
+ * Cached per (course, match, grow, name): renderCourseArt layers the SAME
+ * geometry several times (fill, lip, depth), and marching it once is both
+ * faster and guarantees the layers register exactly.
+ */
+const pathCache = new WeakMap();
+function terrainPath(course, match, { grow = 0, name = 'ground', wobble } = {}) {
+  let byKey = pathCache.get(course);
+  if (!byKey) pathCache.set(course, (byKey = new Map()));
+  const key = name + ':' + grow;
+  if (byKey.has(key)) return byKey.get(key);
+  const p = new Path2D();
+  for (const loop of terrainLoops(course, match, { grow, name, wobble, tilePx: TILE })) {
+    p.moveTo(loop[0][0], loop[0][1]);
+    for (let i = 1; i < loop.length; i++) p.lineTo(loop[i][0], loop[i][1]);
+    p.closePath();
+  }
+  byKey.set(key, p);
+  return p;
 }
 
-function layer(ctx, course, match, fill, { grow = 3, shadow = null } = {}) {
+function layer(ctx, course, match, fill, { grow = 3, shadow = null, name = 'ground' } = {}) {
   ctx.save();
   if (shadow) {
     ctx.shadowColor = shadow;
@@ -56,37 +78,30 @@ function layer(ctx, course, match, fill, { grow = 3, shadow = null } = {}) {
     ctx.shadowOffsetY = 3;
   }
   ctx.fillStyle = fill;
-  ctx.beginPath();
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (match(cellAt(course, x, y))) blob(ctx, x, y, grow);
-    }
-  }
-  ctx.fill();
+  ctx.fill(terrainPath(course, match, { grow, name }));
   ctx.restore();
 }
 
-/** Diagonal mowing stripes clipped to a terrain type. */
-function stripes(ctx, course, match, color, band) {
+/**
+ * Mowing stripes clipped to a terrain path — and ANGLED. A crew mows a fairway
+ * across the line of play, so the bands run perpendicular to tee→cup instead
+ * of at one global diagonal that ignores the hole entirely. The angle is the
+ * hole's own; on the green the bands are finer and turn 45° from it, the way
+ * a second mowing pass does.
+ */
+function stripes(ctx, course, match, color, band, { name = 'ground', angleOffset = 0 } = {}) {
   ctx.save();
-  ctx.beginPath();
-  for (let y = 0; y < course.height; y++) {
-    for (let x = 0; x < course.width; x++) {
-      if (match(cellAt(course, x, y))) blob(ctx, x, y, 2);
-    }
-  }
-  ctx.clip();
+  ctx.clip(terrainPath(course, match, { grow: 2, name }));
   ctx.fillStyle = color;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
-  for (let d = -h; d < w + h; d += band * 2) {
-    ctx.beginPath();
-    ctx.moveTo(d, 0);
-    ctx.lineTo(d + band, 0);
-    ctx.lineTo(d + band - h, h);
-    ctx.lineTo(d - h, h);
-    ctx.closePath();
-    ctx.fill();
+  const holeAngle = Math.atan2(course.hole.y - course.tee.y, course.hole.x - course.tee.x);
+  const a = holeAngle + Math.PI / 2 + angleOffset;
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(a);
+  const R = Math.hypot(w, h);
+  for (let d = -R; d < R; d += band * 2) {
+    ctx.fillRect(d, -R, band, R * 2);
   }
   ctx.restore();
 }
@@ -101,28 +116,46 @@ export function renderCourseArt(course) {
   // ground: rough with a coarse mottle so big areas don't read flat
   ctx.fillStyle = INK.roughBase;
   ctx.fillRect(0, 0, off.width, off.height);
+  // Mottle, quieter than it was: the old version dropped identical hard discs
+  // on a strict lattice, which read as leopard print once the terrain shapes
+  // went organic. Varied radii, lower alpha, and a hash that breaks the grid.
+  ctx.fillStyle = INK.roughDark;
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {
-      if (cellAt(course, x, y) === ROUGH && (x * 7 + y * 13) % 5 === 0) {
-        ctx.fillStyle = INK.roughDark;
-        ctx.beginPath();
-        ctx.arc((x + 0.5) * TILE, (y + 0.5) * TILE, TILE * 0.55, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      if (cellAt(course, x, y) !== ROUGH) continue;
+      const h = (x * 2654435761 + y * 96557) >>> 8;
+      if (h % 5 !== 0) continue;
+      const r = TILE * (0.35 + (h % 97) / 97 * 0.35);
+      ctx.globalAlpha = 0.35 + (h % 53) / 53 * 0.3;
+      ctx.beginPath();
+      ctx.arc((x + 0.5) * TILE + ((h % 13) - 6), (y + 0.5) * TILE + ((h % 11) - 5), r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
+  ctx.globalAlpha = 1;
 
   const is = (t) => (v) => v === t;
   // fringe halo under fairway+green ties the mown shapes together
-  layer(ctx, course, (t) => t === FAIRWAY || t === GREEN, INK.fringe, { grow: 5 });
-  layer(ctx, course, is(FAIRWAY), INK.fairway, { grow: 3 });
-  stripes(ctx, course, is(FAIRWAY), 'rgba(255,255,255,0.07)', 34);
-  layer(ctx, course, is(SAND), INK.sand, { grow: 2, shadow: 'rgba(60,40,10,0.45)' });
-  // bunker lips: a darker inner rim
-  layer(ctx, course, is(SAND), INK.sandShade, { grow: -4 });
-  layer(ctx, course, is(SAND), INK.sand, { grow: -6 });
-  layer(ctx, course, is(WATER), INK.waterDeep, { grow: 2, shadow: 'rgba(10,30,60,0.5)' });
-  layer(ctx, course, is(WATER), INK.water, { grow: -3 });
+  layer(ctx, course, (t) => t === FAIRWAY || t === GREEN, INK.fringe, { grow: 5, name: 'fringe' });
+  layer(ctx, course, is(FAIRWAY), INK.fairway, { grow: 3, name: 'fairway' });
+  stripes(ctx, course, is(FAIRWAY), 'rgba(255,255,255,0.07)', 34, { name: 'fairway' });
+  layer(ctx, course, is(SAND), INK.sand, { grow: 2, shadow: 'rgba(60,40,10,0.45)', name: 'sand' });
+  // bunker lip: the same contour stroked from inside, so the rim follows every
+  // curve of the shape exactly instead of being a second, smaller shape
+  ctx.save();
+  ctx.clip(terrainPath(course, is(SAND), { grow: 2, name: 'sand' }));
+  ctx.strokeStyle = INK.sandShade;
+  ctx.lineWidth = 7;
+  ctx.stroke(terrainPath(course, is(SAND), { grow: 2, name: 'sand' }));
+  ctx.restore();
+  layer(ctx, course, is(WATER), INK.waterDeep, { grow: 2, shadow: 'rgba(10,30,60,0.5)', name: 'water' });
+  layer(ctx, course, is(WATER), INK.water, { grow: -4, name: 'water' });
+  // shoreline: a bright hairline where water meets land
+  ctx.save();
+  ctx.strokeStyle = 'rgba(200,230,255,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke(terrainPath(course, is(WATER), { grow: 2, name: 'water' }));
+  ctx.restore();
   // ripple glints
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = 1.5;
@@ -138,10 +171,10 @@ export function renderCourseArt(course) {
       }
     }
   }
-  layer(ctx, course, is(ICE), INK.ice, { grow: 2, shadow: 'rgba(120,180,200,0.4)' });
-  layer(ctx, course, is(GREEN), INK.green, { grow: 3, shadow: 'rgba(20,60,20,0.45)' });
-  stripes(ctx, course, is(GREEN), 'rgba(255,255,255,0.09)', 16);
-  layer(ctx, course, (t) => !!slopeDir(t), INK.slope, { grow: 1 });
+  layer(ctx, course, is(ICE), INK.ice, { grow: 2, shadow: 'rgba(120,180,200,0.4)', name: 'ice' });
+  layer(ctx, course, is(GREEN), INK.green, { grow: 3, shadow: 'rgba(20,60,20,0.45)', name: 'green' });
+  stripes(ctx, course, is(GREEN), 'rgba(255,255,255,0.09)', 16, { name: 'green', angleOffset: Math.PI / 4 });
+  layer(ctx, course, (t) => !!slopeDir(t), INK.slope, { grow: 1, name: 'slope' });
   // slope arrows
   for (let y = 0; y < course.height; y++) {
     for (let x = 0; x < course.width; x++) {

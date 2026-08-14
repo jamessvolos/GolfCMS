@@ -452,3 +452,40 @@ body {
      caddie line and score strip, and only ever half-fit behind them */
   #stamp-chip { display: none; }
 }
+
+
+/* --- the arrival card ------------------------------------------------------
+   Shown while the intro camera holds on the green. Fades and lifts away as the
+   camera eases back to the tee. Pure presentation: pointer events pass through,
+   so the first real input is never swallowed — it skips the intro instead. */
+#holecard {
+  position: fixed;
+  left: 50%;
+  top: 26%;
+  transform: translate(-50%, -50%) translateY(6px);
+  text-align: center;
+  pointer-events: none;
+  z-index: 40;
+  opacity: 0;
+  transition: opacity 420ms ease, transform 420ms ease;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55);
+}
+#holecard.show { opacity: 1; transform: translate(-50%, -50%); }
+#holecard .hc-kicker {
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #cfe6cf;
+  opacity: 0.85;
+}
+#holecard .hc-title {
+  font-size: clamp(28px, 5vw, 44px);
+  font-weight: 800;
+  color: #fff;
+  margin: 2px 0 4px;
+}
+#holecard .hc-sub {
+  font-size: 15px;
+  color: #dceedd;
+  opacity: 0.95;
+}

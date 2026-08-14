@@ -304,6 +304,58 @@ function zoomBounds() {
 
 const camBounds = () => ({ width: course?.width ?? 40, height: course?.height ?? 24, margin: 2 });
 
+// --- the arrival -----------------------------------------------------------
+// A new hole opens ON THE GREEN: the camera holds there with a title card —
+// name, number, par and yardage, what green and where the flag is cut — then
+// eases back down the fairway to the tee. Since release D the hole is worth
+// reading before the swing; this makes the game read it to you. Any input
+// skips straight to the tee framing, and reduced-motion never flies at all.
+let introTimer = 0;
+const holeCard = document.getElementById('holecard');
+const HOLE_CARD_MS = 1500;
+const INTRO_EASE_MS = 1300;
+
+function introCamera() {
+  if (!greenRect) return null;
+  const view = camView();
+  return frameRect(
+    { x0: greenRect.x0, y0: greenRect.y0, x1: greenRect.x1, y1: greenRect.y1 },
+    { ...view, ...visibleCanvasPx(), pad: 3.5, min: 1, max: 3.2 },
+  );
+}
+
+let cardHideTimer = 0;
+
+function showHoleCard({ kicker, title, sub }) {
+  if (!holeCard) return;
+  // A hide scheduled moments ago (loadHole's own cleanup, most often) must not
+  // fire into the card we are about to show — the first version lost every
+  // intro to exactly that stale timer, 450 ms after it began.
+  if (cardHideTimer) { clearTimeout(cardHideTimer); cardHideTimer = 0; }
+  holeCard.querySelector('.hc-kicker').textContent = kicker;
+  holeCard.querySelector('.hc-title').textContent = title;
+  holeCard.querySelector('.hc-sub').textContent = sub;
+  holeCard.hidden = false;
+  requestAnimationFrame(() => holeCard.classList.add('show'));
+}
+
+function hideHoleCard() {
+  if (!holeCard) return;
+  holeCard.classList.remove('show');
+  if (cardHideTimer) clearTimeout(cardHideTimer);
+  cardHideTimer = setTimeout(() => { cardHideTimer = 0; holeCard.hidden = true; }, 450);
+}
+
+/** End the intro early (first input) or on schedule: card away, camera home. */
+function endIntro({ instant = false } = {}) {
+  if (!introTimer) return;
+  clearTimeout(introTimer);
+  introTimer = 0;
+  hideHoleCard();
+  if (instant) applyCam(lieCamMode(), { instant: true });
+  else settleCam({ dur: INTRO_EASE_MS });
+}
+
 function cancelCamAnim() {
   if (camRaf) cancelAnimationFrame(camRaf);
   camRaf = 0;
@@ -559,6 +611,8 @@ function loadHole() {
   phase = 'loading';
   cancelFx();
   cancelCamAnim(); // no ease may outlive the course it was framing
+  if (introTimer) { clearTimeout(introTimer); introTimer = 0; }
+  hideHoleCard();
   camPending = null;
   hideStamp();
   clearDanger();
@@ -587,9 +641,27 @@ function loadHole() {
     puttPos = null;
     puttCount = 0;
     holedOut = false;
-    // a fresh hole opens on the framing its tee shot earns — new art, so there
-    // is nothing to ease from. (A short par 3 can open on the corridor.)
-    applyCam(lieCamMode(), { instant: true });
+    // a fresh hole opens with the ARRIVAL: camera on the green, title card up,
+    // then an ease back down the fairway to the framing the tee shot earns.
+    // Reduced motion (or a green the finder somehow missed) skips straight
+    // to the tee framing, exactly as before.
+    const intro = reducedMotion.matches ? null : introCamera();
+    if (intro) {
+      cancelCamAnim();
+      camera = intro;
+      showHoleCard({
+        kicker: `${courseName(round.seed)} · hole ${round.holeIndex + 1} of ${round.count}`,
+        title: `Par ${holeInfo.par} · ${holeInfo.yds} yds`,
+        sub: course.green ? copy.greenNote(course.green.archetype, course.pin?.name).replace(/^[\s·]+/, '') : '',
+      });
+      introTimer = setTimeout(() => {
+        introTimer = 0;
+        hideHoleCard();
+        settleCam({ dur: INTRO_EASE_MS });
+      }, HOLE_CARD_MS);
+    } else {
+      applyCam(lieCamMode(), { instant: true });
+    }
     phase = 'aim';
     const label = round.label ?? (round.daily ? copy.dailyLabel(dailyNumber()) : copy.roundLabel(round.seed));
     meta.textContent = copy.holeMeta({
@@ -1081,6 +1153,7 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerdown', (e) => {
+  endIntro({ instant: true });
   if (e.pointerType !== 'touch') return;
   if (!touchMode) {
     touchMode = true;
@@ -1154,6 +1227,7 @@ canvas.addEventListener('wheel', (e) => {
 const PEEK_TAP_MS = 260;
 let peekDownAt = 0;
 window.addEventListener('keydown', (e) => {
+  endIntro({ instant: true });
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   const k = e.key.toLowerCase();

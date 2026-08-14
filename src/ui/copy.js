@@ -155,6 +155,7 @@ export const copy = {
   onboardingStep: (n, total) => `Step ${n} of ${total}`,
   onboarding: [
     { title: 'Aim the ellipse', body: 'Move the mouse — or drag a finger — and the ellipse follows. That is your shot pattern: the ball can finish anywhere inside it.' },
+    { title: 'Read the light', body: 'The beam ahead of your ball is the caddie\u2019s honest read: lit ground costs fewer strokes from there, shadowed ground costs more. It only shows where this swing can reach \u2014 and it goes dark in Pro mode.' },
     { title: 'Commit the shot', body: 'Click the course (or tap Hit it) when you like the shape. The ball flies to one spot from your pattern — then the caddie shows the line they would have picked.' },
     { title: 'Keep score', body: 'Every target is scored against the caddie’s best line — up to 1,000 points a hole. Closer call, bigger score.' },
   ],
