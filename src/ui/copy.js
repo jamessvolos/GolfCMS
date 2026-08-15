@@ -155,6 +155,7 @@ export const copy = {
   }[cat] ?? ''),
 
   // ---- round labels ----
+  tracedLabel: 'Traced hole',
   dailyLabel: (n) => `Daily #${n}`,
   roundLabel: (seed) => `Round ${seed}`,
   majorLabel: (wk) => `Major ${wk}`,

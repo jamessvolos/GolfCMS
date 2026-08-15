@@ -44,7 +44,14 @@
   <button id="certify">Certify</button>
   <button id="share" disabled>Copy challenge URL</button>
   <button id="play" disabled>Play it</button>
+  <button id="playCaddie" disabled title="Play this trace as a Caddie strategy hole — on its photo, if one is loaded">Play in Caddie</button>
   <span id="verdict"></span>
+</div>
+<div id="geobar" class="panel bar">
+  <span class="meta">Real hole? Pin it to Earth (optional):</span>
+  <label>Tee lat,lon <input id="geoTee" placeholder="34.0495, -118.5013" size="20" spellcheck="false"></label>
+  <label>Cup lat,lon <input id="geoCup" placeholder="34.0512, -118.4980" size="20" spellcheck="false"></label>
+  <span class="meta">two anchors fix scale, rotation and place — shares carry ~23 chars of coordinates, never imagery</span>
 </div>
 <div id="underlaybar" class="panel bar">
   <label>Aerial underlay <input id="underlay" type="file" accept="image/*"></label>

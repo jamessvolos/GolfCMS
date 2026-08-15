@@ -8,6 +8,7 @@ import { solve } from '../engine/solver.js';
 import { diffCourses, encodePatch, encodeGridPatch } from '../engine/patch.js';
 import { detectTerrain } from '../engine/aerial.js';
 import { photoKey, savePlayPhoto } from './photo.js';
+import { encodeGeoRef, geoFromAnchors, parseLatLon } from '../engine/georef.js';
 import { terrainColor } from './render.js';
 
 const PALETTE = [
@@ -42,6 +43,7 @@ function invalidate() {
   verdict.textContent = 'uncertified — hit Certify';
   document.getElementById('share').disabled = true;
   document.getElementById('play').disabled = true;
+  document.getElementById('playCaddie').disabled = true;
 }
 
 // --- the aerial underlay -----------------------------------------------------
@@ -260,6 +262,7 @@ document.getElementById('certify').addEventListener('click', () => {
     if (underlay) bakePlayPhoto().catch(() => { /* storage blocked: photo is a bonus */ });
     document.getElementById('share').disabled = false;
     document.getElementById('play').disabled = false;
+    document.getElementById('playCaddie').disabled = false;
   }, 10);
 });
 
@@ -268,14 +271,41 @@ function currentPatchStr() {
   return edits.length > 400 ? encodeGridPatch(course.cells) : encodePatch(edits);
 }
 
+/** The georeference, when the author pinned the hole to Earth: two lat/lon
+ *  anchors (tee, cup) fully determine scale, rotation, and place. Invalid or
+ *  empty fields simply mean no geo — never an error. */
+function currentGeoStr() {
+  const teeLL = parseLatLon(document.getElementById('geoTee')?.value);
+  const cupLL = parseLatLon(document.getElementById('geoCup')?.value);
+  if (!teeLL || !cupLL) return null;
+  try {
+    return encodeGeoRef(geoFromAnchors({
+      tee: course.tee, cup: course.hole, teeLL, cupLL,
+      width: course.width, height: course.height,
+      vintage: new Date().getUTCFullYear(),
+    }));
+  } catch {
+    return null;
+  }
+}
+
 function challengeUrl() {
   const patch = currentPatchStr();
+  const geo = currentGeoStr();
   // the #/hole route lives in the ARCADE — index.html is the Caddie surface
   // and would silently fall back to its daily. `photo=1` tells the arcade a
   // baked ground may be waiting in IndexedDB; the URL itself stays imagery-free.
   return `${location.origin}${location.pathname.replace(/editor\.html$/, 'arcade.html')}` +
     `#/hole/${base.seed}/standard/${base.biome}` +
-    (patch ? `?p=${patch}${underlay ? '&photo=1' : ''}` : '');
+    (patch ? `?p=${patch}${underlay ? '&photo=1' : ''}${geo ? `&geo=${geo}` : ''}` : '');
+}
+
+/** The same trace as a Caddie strategy hole: the #/traced route, Wave 2. */
+function caddieUrl() {
+  const geo = currentGeoStr();
+  return `${location.origin}${location.pathname.replace(/editor\.html$/, 'index.html')}` +
+    `#/traced/${base.seed}/${base.biome}?p=${currentPatchStr()}` +
+    `${underlay ? '&photo=1' : ''}${geo ? `&geo=${geo}` : ''}`;
 }
 
 /** The Thin Coat handoff: bake the aligned photo once at world resolution and
@@ -298,6 +328,7 @@ document.getElementById('share').addEventListener('click', () => {
   navigator.clipboard?.writeText(`My custom par-${certified.par} hole: ${challengeUrl()}`);
 });
 document.getElementById('play').addEventListener('click', () => window.open(challengeUrl(), '_blank'));
+document.getElementById('playCaddie').addEventListener('click', () => window.open(caddieUrl(), '_blank'));
 document.getElementById('load').addEventListener('click', () => {
   load(Number(document.getElementById('seed').value) >>> 0, document.getElementById('biome').value);
 });

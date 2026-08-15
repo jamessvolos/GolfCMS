@@ -12,6 +12,7 @@ import { solve } from '../engine/solver.js';
 import { estimateStars, starLabel, calibration } from '../engine/difficulty.js';
 import { initSound, play, setMuted, isMuted } from './sound.js';
 import { photoKey, loadPlayPhoto } from './photo.js';
+import { decodeGeoRef, formatGeo } from '../engine/georef.js';
 import { applyShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
@@ -115,6 +116,11 @@ function loadFromHash() {
           custom: true,
         }, false);
         meta.textContent = `Custom hole · seed ${seed} · ${biome} · par ${solved ? solved.strokes : '?'}`;
+        // provenance: a georeferenced trace says where on Earth it is
+        try {
+          const geoStr = params.get('geo');
+          if (geoStr) meta.textContent += ` · ${formatGeo(decodeGeoRef(geoStr))}`;
+        } catch { /* malformed geo is dropped, never fatal */ }
         // the trace's baked aerial, if this machine has it: the photo ground.
         // Key mismatch or absence loads nothing — tile-only is the fallback.
         if (params.get('photo')) {

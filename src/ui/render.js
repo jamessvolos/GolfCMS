@@ -36,8 +36,9 @@ function drawSlopeArrow(ctx, x, y, dir) {
 /** Halftone & Turf's truth clamp, mandated by the bake-off verdict: in photo
  *  mode, wherever the picture and the physics might disagree, the physics is
  *  inked on top — hazard boundaries as cased strokes the photo can't argue
- *  with. The player always sees the line where the engine starts charging. */
-function strokeHazardTruth(ctx, course) {
+ *  with. The player always sees the line where the engine starts charging.
+ *  Exported: the Caddie surface bakes the same ink into its photo ground. */
+export function strokeHazardTruth(ctx, course) {
   const at = (x, y) =>
     x < 0 || y < 0 || x >= course.width || y >= course.height ? -1 : cellAt(course, x, y);
   const edges = (match) => {
