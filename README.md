@@ -49,6 +49,12 @@ python3 -m http.server 8000
 - **Creator mode** (`editor.html`): repaint any generated hole tile by tile,
   certify it with the solver, and share it as seed + patch in a URL. Tee and
   cup stay anchored; uncertifiable holes can't be shared.
+- **Real holes from aerial photos**: load a satellite or drone image as the
+  editor's underlay, align it (pan/zoom/rotate) so the real tee and cup sit
+  on the anchors, and **Detect terrain** (`src/engine/aerial.js`) drafts the
+  trace — HSV + texture classification per tile, modal smoothing, greens only
+  near the cup. Correct the draft, certify, share. The photo never leaves
+  your machine: a shared trace is a full-grid patch in the URL, never imagery.
 - **Difficulty stars**: every certified hole is rated 1–5★ from its
   certificate (par, lie, wind, biome), and the rating self-calibrates against
   your own recorded rounds ("plays harder than rated for you").

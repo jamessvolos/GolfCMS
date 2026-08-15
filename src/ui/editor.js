@@ -5,7 +5,8 @@ import { generateCourse } from '../engine/generate.js';
 import { cellAt, setCell, inBounds } from '../engine/course.js';
 import { TERRAIN_NAMES, FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE, SLOPE_N, SLOPE_S, SLOPE_E, SLOPE_W, slopeDir } from '../engine/terrain.js';
 import { solve } from '../engine/solver.js';
-import { diffCourses, encodePatch } from '../engine/patch.js';
+import { diffCourses, encodePatch, encodeGridPatch } from '../engine/patch.js';
+import { detectTerrain } from '../engine/aerial.js';
 import { terrainColor } from './render.js';
 
 const PALETTE = [
@@ -43,23 +44,35 @@ function invalidate() {
 }
 
 // --- the aerial underlay -----------------------------------------------------
-// The first step toward playing real holes. A local image — a satellite or
-// drone capture the user already has — draws UNDER the tile grid, and the
-// ground fades to a translucent tracing layer over it. Paint what you see,
-// certify, share. Two rules keep it honest:
+// The path to playing real holes. A local image — a satellite or drone
+// capture the user already has — draws UNDER the tile grid, and the ground
+// fades to a translucent tracing layer over it. Align it (pan/zoom/rotate so
+// the real tee and cup sit on the anchors), let detection draft the trace,
+// correct it, certify, share. Two rules keep it honest:
 //   THE TILES ARE STILL THE TRUTH. The engine scores the mask, not the photo.
-//   Tracing is exactly the act of making the two agree.
+//   Detection is a first draft of the trace, never an authority.
 //   THE IMAGE NEVER LEAVES THE MACHINE. It is session-state, not course data:
 //   a shared URL carries seed + patch, so redistribution of imagery — the
 //   entire licensing question — never arises.
-let underlay = null; // {img, dx, dy, dw, dh} cover-fitted to the board
+let underlay = null; // {img, k} — k is the cover-fit factor; user transform below
 let traceAlpha = 0.45;
+let uZoom = 1; // user zoom on top of cover-fit
+let uRot = 0; // degrees
+let uPan = { x: 0, y: 0 }; // canvas px
+let moveMode = false; // drag pans the photo instead of painting
+let panning = null; // {x, y} pointer position while dragging the photo
 
-function fitUnderlay(img) {
-  const k = Math.max(canvas.width / img.width, canvas.height / img.height);
-  const dw = img.width * k;
-  const dh = img.height * k;
-  return { img, dw, dh, dx: (canvas.width - dw) / 2, dy: (canvas.height - dh) / 2 };
+const underlayCtls = ['tracectl', 'zoomctl', 'rotctl', 'uMove', 'detect', 'clearUnderlay'];
+
+/** Paint the underlay onto any 2d context with the current user transform. */
+function drawUnderlayTo(c) {
+  const { img, k } = underlay;
+  c.save();
+  c.translate(canvas.width / 2 + uPan.x, canvas.height / 2 + uPan.y);
+  c.rotate((uRot * Math.PI) / 180);
+  c.scale(k * uZoom, k * uZoom);
+  c.drawImage(img, -img.width / 2, -img.height / 2);
+  c.restore();
 }
 
 document.getElementById('underlay').addEventListener('change', (e) => {
@@ -67,11 +80,13 @@ document.getElementById('underlay').addEventListener('change', (e) => {
   if (!file) return;
   const img = new Image();
   img.onload = () => {
-    underlay = fitUnderlay(img);
-    document.getElementById('tracectl').hidden = false;
-    document.getElementById('clearUnderlay').hidden = false;
+    underlay = { img, k: Math.max(canvas.width / img.width, canvas.height / img.height) };
+    uZoom = 1; uRot = 0; uPan = { x: 0, y: 0 };
+    document.getElementById('uZoom').value = 100;
+    document.getElementById('uRot').value = 0;
+    for (const id of underlayCtls) document.getElementById(id).hidden = false;
     document.getElementById('underlayNote').textContent =
-      'tracing: the photo is under the ground — paint the terrain you see';
+      'align the photo (zoom/rotate/move) so tee and cup match, then Detect or paint';
     draw();
   };
   img.src = URL.createObjectURL(file);
@@ -80,19 +95,75 @@ document.getElementById('traceAlpha').addEventListener('input', (e) => {
   traceAlpha = Number(e.target.value) / 100;
   draw();
 });
+document.getElementById('uZoom').addEventListener('input', (e) => {
+  uZoom = Number(e.target.value) / 100;
+  draw();
+});
+document.getElementById('uRot').addEventListener('input', (e) => {
+  uRot = Number(e.target.value);
+  draw();
+});
+const moveBtn = document.getElementById('uMove');
+moveBtn.addEventListener('click', () => {
+  moveMode = !moveMode;
+  moveBtn.setAttribute('aria-pressed', String(moveMode));
+  moveBtn.classList.toggle('active', moveMode);
+  canvas.style.cursor = moveMode ? 'grab' : 'crosshair';
+});
 document.getElementById('clearUnderlay').addEventListener('click', () => {
   underlay = null;
+  moveMode = false;
+  moveBtn.setAttribute('aria-pressed', 'false');
+  moveBtn.classList.remove('active');
+  canvas.style.cursor = 'crosshair';
   document.getElementById('underlay').value = '';
-  document.getElementById('tracectl').hidden = true;
-  document.getElementById('clearUnderlay').hidden = true;
+  for (const id of underlayCtls) document.getElementById(id).hidden = true;
   document.getElementById('underlayNote').textContent = '';
   draw();
+});
+
+// --- detection: the classifier drafts the trace ------------------------------
+document.getElementById('detect').addEventListener('click', () => {
+  if (!underlay) return;
+  // render the aligned photo alone, then hand per-tile samples to the engine
+  const off = document.createElement('canvas');
+  off.width = canvas.width;
+  off.height = canvas.height;
+  const octx = off.getContext('2d', { willReadFrequently: true });
+  drawUnderlayTo(octx);
+  const px = octx.getImageData(0, 0, off.width, off.height).data;
+  const STEP = 4; // 36 samples per 24px tile
+  const tileSamples = (tx, ty) => {
+    const samples = [];
+    for (let y = ty * TILE + 2; y < (ty + 1) * TILE; y += STEP) {
+      for (let x = tx * TILE + 2; x < (tx + 1) * TILE; x += STEP) {
+        const i = (y * off.width + x) * 4;
+        if (px[i + 3] < 128) continue; // outside the photo after alignment
+        samples.push([px[i], px[i + 1], px[i + 2]]);
+      }
+    }
+    return samples;
+  };
+  const cells = detectTerrain({
+    width: course.width, height: course.height, tileSamples, hole: course.hole,
+  });
+  for (let y = 0; y < course.height; y++) {
+    for (let x = 0; x < course.width; x++) {
+      if ((x === course.tee.x && y === course.tee.y) ||
+          (x === course.hole.x && y === course.hole.y)) continue;
+      setCell(course, x, y, cells[y * course.width + x]);
+    }
+  }
+  invalidate();
+  draw();
+  document.getElementById('underlayNote').textContent =
+    'detected — a first draft: fix what it got wrong, then Certify';
 });
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (underlay) {
-    ctx.drawImage(underlay.img, underlay.dx, underlay.dy, underlay.dw, underlay.dh);
+    drawUnderlayTo(ctx);
     ctx.globalAlpha = traceAlpha;
   }
   for (let y = 0; y < course.height; y++) {
@@ -141,9 +212,33 @@ function paintAt(e) {
   draw();
 }
 
-canvas.addEventListener('mousedown', (e) => { painting = true; paintAt(e); });
-canvas.addEventListener('mousemove', (e) => { if (painting) paintAt(e); });
-window.addEventListener('mouseup', () => { painting = false; });
+canvas.addEventListener('mousedown', (e) => {
+  if (moveMode && underlay) {
+    panning = { x: e.clientX, y: e.clientY };
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
+  painting = true;
+  paintAt(e);
+});
+canvas.addEventListener('mousemove', (e) => {
+  if (panning) {
+    const r = canvas.getBoundingClientRect();
+    uPan.x += (e.clientX - panning.x) * (canvas.width / r.width);
+    uPan.y += (e.clientY - panning.y) * (canvas.height / r.height);
+    panning = { x: e.clientX, y: e.clientY };
+    draw();
+    return;
+  }
+  if (painting) paintAt(e);
+});
+window.addEventListener('mouseup', () => {
+  painting = false;
+  if (panning) {
+    panning = null;
+    canvas.style.cursor = moveMode ? 'grab' : 'crosshair';
+  }
+});
 
 document.getElementById('certify').addEventListener('click', () => {
   verdict.textContent = 'solving…';
@@ -155,21 +250,22 @@ document.getElementById('certify').addEventListener('click', () => {
       return;
     }
     const edits = diffCourses(base, course);
-    if (edits.length > 400) {
-      certified = null;
-      verdict.textContent = `✗ too many edits (${edits.length}/400)`;
-      return;
-    }
     certified = { par: solved.strokes };
-    verdict.textContent = `✓ certified · par ${solved.strokes} · ${edits.length} edits`;
+    // big edits (a full aerial trace) ship as a whole-grid patch instead of a
+    // diff, so there is no ceiling on how much of the board a trace repaints
+    verdict.textContent = `✓ certified · par ${solved.strokes} · ${edits.length} edits` +
+      (edits.length > 400 ? ' · full-grid share' : '');
     document.getElementById('share').disabled = false;
     document.getElementById('play').disabled = false;
   }, 10);
 });
 
 function challengeUrl() {
-  const patch = encodePatch(diffCourses(base, course));
-  return `${location.origin}${location.pathname.replace(/editor\.html$/, 'index.html')}` +
+  const edits = diffCourses(base, course);
+  const patch = edits.length > 400 ? encodeGridPatch(course.cells) : encodePatch(edits);
+  // the #/hole route lives in the ARCADE — index.html is the Caddie surface
+  // and would silently fall back to its daily
+  return `${location.origin}${location.pathname.replace(/editor\.html$/, 'arcade.html')}` +
     `#/hole/${base.seed}/standard/${base.biome}${patch ? `?p=${patch}` : ''}`;
 }
 
