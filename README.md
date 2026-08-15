@@ -71,6 +71,20 @@ python3 -m http.server 8000
   two anchors fully determine scale, rotation, and place, so the HUD can say
   "34.051°N 118.500°W" on any machine. Coordinates travel; imagery never
   does. (Wave 3.)
+- **Satellite ground** — the Shot-Scope view: any geo-pinned hole fetches
+  real imagery as raw XYZ tiles (`src/ui/satellite.js`, no SDK) and composes
+  it under the game, rotated and scaled by the georeference. Bring your own
+  **Mapbox token** for global coverage (create a `pk.` token at mapbox.com,
+  restrict it to your domain, paste it in the editor's Imagery-token field —
+  it stays in your browser, never in the repo or a share); without one the
+  game tries public-domain **USGS NAIP** (US only); if neither answers, the
+  painted tiles are the floor, never an error. The editor's **Fetch
+  imagery** button turns two lat/lon anchors into a pre-aligned tracing
+  underlay — no screenshot safari, no manual alignment. Attribution shows
+  in the HUD whenever fetched imagery is on screen. One honesty note:
+  displaying commercial imagery under the game is what the license is for;
+  bulk-deriving data from it is not — for detection-heavy authoring, prefer
+  NAIP or your own captures.
 - **The Real Nine** (`#/real`, or "Real hole" in the Round menu): a static
   pack of nine solver-certified tribute holes honoring famous real ones —
   the island at Sawgrass, Golden Bell, the Road Hole — one featured per day

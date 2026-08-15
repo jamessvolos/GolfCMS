@@ -12,6 +12,7 @@ import { decodePatch, applyPatch } from '../engine/patch.js';
 import { generateCourse } from '../engine/generate.js';
 import { decodeGeoRef, formatGeo } from '../engine/georef.js';
 import { photoKey, loadPlayPhoto } from './photo.js';
+import { fetchSatelliteGround } from './satellite.js';
 import { abAssign } from '../engine/experiment.js';
 import { strokeHazardTruth } from './render.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
@@ -720,6 +721,19 @@ function loadHole() {
     art = renderCourseArt(course);
     paintedArt = art;
     photoGround = null;
+    if (round.traced?.geo && !round.traced.photo) {
+      // a georeferenced hole with no local photo fetches its REAL ground —
+      // satellite imagery composed under the board, Shot-Scope style. The
+      // Real Nine carry geo, so the daily real hole arrives on real earth.
+      const geoRef = round.traced.geo;
+      fetchSatelliteGround(geoRef, course).then((sat) => {
+        if (!sat || round?.traced?.geo !== geoRef) return; // hole moved on, or no imagery
+        photoGround = bakePhotoGround(sat.canvas);
+        meta.textContent += ` · imagery ${sat.attribution}`;
+        if (photoOn) art = photoGround.canvas;
+        refresh();
+      });
+    }
     if (round.traced?.photo) {
       const key = round.traced.photoKey;
       loadPlayPhoto(key).then((rec) => {

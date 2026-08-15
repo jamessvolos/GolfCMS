@@ -9,6 +9,7 @@ import { diffCourses, encodePatch, encodeGridPatch } from '../engine/patch.js';
 import { detectTerrain } from '../engine/aerial.js';
 import { photoKey, savePlayPhoto } from './photo.js';
 import { encodeGeoRef, geoFromAnchors, parseLatLon } from '../engine/georef.js';
+import { fetchSatelliteGround } from './satellite.js';
 import { terrainColor } from './render.js';
 
 const PALETTE = [
@@ -113,6 +114,49 @@ moveBtn.addEventListener('click', () => {
   moveBtn.classList.toggle('active', moveMode);
   canvas.style.cursor = moveMode ? 'grab' : 'crosshair';
 });
+// --- fetched imagery: coordinates in, satellite underlay out ----------------
+// The two geo anchors fully determine where on Earth the board sits, so the
+// composed imagery arrives pre-aligned: k=1, no pan, no rotate — the anchors
+// ARE the alignment. Mapbox with the player's own token (global), USGS NAIP
+// without one (US), painted-tiles workflow unchanged if neither answers.
+const tokenInput = document.getElementById('imgToken');
+try { tokenInput.value = localStorage.getItem('golfcms.imagery.token') ?? ''; } catch { /* blocked */ }
+tokenInput.addEventListener('change', () => {
+  try { localStorage.setItem('golfcms.imagery.token', tokenInput.value.trim()); } catch { /* best-effort */ }
+});
+document.getElementById('fetchImagery').addEventListener('click', async () => {
+  const note = document.getElementById('underlayNote');
+  const teeLL = parseLatLon(document.getElementById('geoTee').value);
+  const cupLL = parseLatLon(document.getElementById('geoCup').value);
+  if (!teeLL || !cupLL) {
+    note.textContent = 'enter tee and cup lat,lon first — two anchors are the whole alignment';
+    return;
+  }
+  let geo;
+  try {
+    geo = geoFromAnchors({
+      tee: course.tee, cup: course.hole, teeLL, cupLL,
+      width: course.width, height: course.height,
+    });
+  } catch (e) {
+    note.textContent = `bad anchors: ${e.message}`;
+    return;
+  }
+  note.textContent = 'fetching imagery…';
+  const sat = await fetchSatelliteGround(geo, course);
+  if (!sat) {
+    note.textContent = 'no imagery reachable — check the token, or load a local file instead';
+    return;
+  }
+  underlay = { img: sat.canvas, k: 1 };
+  uZoom = 1; uRot = 0; uPan = { x: 0, y: 0 };
+  document.getElementById('uZoom').value = 100;
+  document.getElementById('uRot').value = 0;
+  for (const id of underlayCtls) document.getElementById(id).hidden = false;
+  note.textContent = `imagery ${sat.attribution} — pre-aligned by the anchors: Detect or paint`;
+  draw();
+});
+
 document.getElementById('clearUnderlay').addEventListener('click', () => {
   underlay = null;
   moveMode = false;
