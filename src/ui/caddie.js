@@ -8,6 +8,11 @@ import { GREEN, WATER, slopeDir } from '../engine/terrain.js';
 import { lieParams, lieParamsAt, shotPlaysLike, sigmas, patternStats, sampleLanding, restingCell, windShift, reach, HANDICAPS, handicapById, puttSigmas, samplePuttRoll, puttHolesOut, PUTT_MAX, puttBreakDrift, CUP_R } from '../engine/dispersion.js';
 import { strokesField, scoreDecision, aimHeatmap, isHoleOver, scorePuttDecision, puttHeatmap, puttStats, onPuttingSurface } from '../engine/strategy.js';
 import { caddieHoleSeed, caddieHoleCourse, encodeCaddieRound } from '../engine/caddierec.js';
+import { decodePatch, applyPatch } from '../engine/patch.js';
+import { generateCourse } from '../engine/generate.js';
+import { decodeGeoRef, formatGeo } from '../engine/georef.js';
+import { photoKey, loadPlayPhoto } from './photo.js';
+import { strokeHazardTruth } from './render.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
 import { courseName } from '../engine/namer.js';
@@ -40,6 +45,10 @@ let round = null; // {seed, daily, holeIndex, holes: [{points, strokes}], totalP
 let countdownTimer = null; // ticks the "next daily in…" clock on the round overlay
 let rival = null; // a challenge link's card to beat: {seed, holes: [pts], total}
 let riskStreak = 0; // days of daily streak that die at UTC midnight if today goes unplayed
+let photoGround = null; // {canvas, luma} — a traced hole's baked aerial, when this machine has it
+let paintedArt = null; // the painter's ground, kept so B can swap instantly
+let photoOn = true; // B toggles photo ↔ paint; the game underneath never changes
+const photoMode = () => Boolean(photoGround && photoOn);
 let course = null;
 let V = null;
 let costImage = null; // release E: V as greyscale, one pixel per tile, cached per hole
@@ -618,11 +627,55 @@ function positionStamp() {
 }
 function hideStamp() { stampEl.hidden = true; }
 
+/** Bake a traced hole's aerial into a Caddie ground canvas: the photo at
+ *  world resolution, Halftone's truth clamp inked straight into the ground,
+ *  and a per-tile luma map pre-sampled once (Overlay Optics' trick) so
+ *  overlays adapt to local brightness with zero per-frame getImageData. */
+function bakePhotoGround(img) {
+  const off = document.createElement('canvas');
+  off.width = course.width * TILE;
+  off.height = course.height * TILE;
+  const g = off.getContext('2d', { willReadFrequently: true });
+  g.fillStyle = '#22301f'; // letterbox where the photo doesn't cover
+  g.fillRect(0, 0, off.width, off.height);
+  g.drawImage(img, 0, 0, off.width, off.height);
+  const data = g.getImageData(0, 0, off.width, off.height).data;
+  const luma = new Float32Array(course.width * course.height);
+  for (let ty = 0; ty < course.height; ty++) {
+    for (let tx = 0; tx < course.width; tx++) {
+      let sum = 0;
+      let n = 0;
+      for (let y = ty * TILE + 3; y < (ty + 1) * TILE; y += 6) {
+        for (let x = tx * TILE + 3; x < (tx + 1) * TILE; x += 6) {
+          const i = (y * off.width + x) * 4;
+          sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+          n++;
+        }
+      }
+      luma[ty * course.width + tx] = n ? sum / (n * 255) : 0.5;
+    }
+  }
+  strokeHazardTruth(g, course); // where photo and physics disagree, physics is inked
+  return { canvas: off, luma };
+}
+
+/** Mean photo luminance under a world point, 0..1 — from the pre-baked map. */
+function lumaAt(x, y) {
+  if (!photoGround) return 0.35;
+  const tx = Math.max(0, Math.min(course.width - 1, Math.round(x)));
+  const ty = Math.max(0, Math.min(course.height - 1, Math.round(y)));
+  return photoGround.luma[ty * course.width + tx];
+}
+
 function startRound(seed, daily, opts = {}) {
   round = {
     seed: seed >>> 0, daily, holeIndex: 0, holes: [], totalPoints: 0,
     count: opts.count ?? HOLES_PER_ROUND, label: opts.label ?? null, hash: opts.hash ?? null,
-    rec: [], // completed holes' decision records, for the board submission
+    // a traced hole carries its own ground: {course, geo, photo, photoKey}.
+    // Its decisions can't be board-verified (the verifier re-derives holes
+    // from seeds, not patches), so rec stays null and submission never fires.
+    traced: opts.traced ?? null,
+    rec: opts.traced ? null : [], // completed holes' decision records, for the board
   };
   location.hash = round.hash ?? (daily ? '#/daily' : `#/round/${round.seed}`);
   syncModeSelect();
@@ -651,15 +704,33 @@ function loadHole() {
   meta.textContent = copy.loadingHole(round.holeIndex + 1, round.count);
   setTimeout(() => {
     // hole derivation lives in caddierec.js — the SAME helpers the
-    // leaderboard verifier replays against, so they can never drift
-    const seed = caddieHoleSeed(round.seed, round.holeIndex);
-    course = caddieHoleCourse(seed);
+    // leaderboard verifier replays against, so they can never drift.
+    // A traced round instead brings its own patched course (Wave 2 of the
+    // aerial verdict): one hole, real ground, no board submission.
+    const seed = round.traced ? round.seed : caddieHoleSeed(round.seed, round.holeIndex);
+    course = round.traced ? round.traced.course : caddieHoleCourse(seed);
     recHole = { holeSeed: seed, decisions: [], puttDecisions: [] };
     const lengthTiles = dist(course.tee, course.hole);
     holeInfo = { par: parForTiles(lengthTiles), yds: holeYards(lengthTiles) };
     V = strokesField(course, 6, profile);
     costImage = null;
     art = renderCourseArt(course);
+    paintedArt = art;
+    photoGround = null;
+    if (round.traced?.photo) {
+      const key = round.traced.photoKey;
+      loadPlayPhoto(key).then((rec) => {
+        if (!rec || round?.traced?.photoKey !== key) return; // hole moved on
+        const img = new Image();
+        img.onload = () => {
+          if (round?.traced?.photoKey !== key) return;
+          photoGround = bakePhotoGround(img);
+          if (photoOn) art = photoGround.canvas;
+          refresh();
+        };
+        img.src = URL.createObjectURL(rec.blob);
+      });
+    }
     greenArt = null; // new hole, new green — rebuilt on the first putt
     greenRect = findGreenRect();
     ball = { ...course.tee };
@@ -705,6 +776,8 @@ function loadHole() {
     });
     // the streak that dies at midnight rides the ticker until today's daily is in
     if (round.daily && riskStreak > 0) meta.textContent += copy.streakChip(riskStreak);
+    // a georeferenced trace says where on Earth it is — provenance, never physics
+    if (round.traced?.geo) meta.textContent += ` · ${formatGeo(round.traced.geo)}`;
     verdict.textContent = copy.firstAim(yards(toPin(ball)));
     document.getElementById('pattern').textContent = '';
     if (touchMode) initNeutralAim();
@@ -807,13 +880,26 @@ function drawCone() {
   ctx.save();
   if (coneBeamPath(ctx, from, aimTarget, sigmaAt, bend)) {
     ctx.clip();
-    ctx.globalCompositeOperation = 'soft-light';
-    ctx.globalAlpha = CONE_ALPHA;
     // one pixel per tile, drawn across the whole board with smoothing on: the
     // bilinear upscale is what stops a coarse field looking like a mosaic
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(costImage.canvas, 0, 0, course.width * TILE, course.height * TILE);
+    if (photoMode()) {
+      // broadcast two-pass: soft-light bends around the PHOTO's own midtones
+      // and half-vanishes on bright imagery, so on photography the cone runs
+      // multiply (darkens toward expensive ground) then screen (lifts toward
+      // cheap ground) — reads as weather on any exposure
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalAlpha = 0.4;
+      ctx.drawImage(costImage.canvas, 0, 0, course.width * TILE, course.height * TILE);
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = 0.26;
+      ctx.drawImage(costImage.canvas, 0, 0, course.width * TILE, course.height * TILE);
+    } else {
+      ctx.globalCompositeOperation = 'soft-light';
+      ctx.globalAlpha = CONE_ALPHA;
+      ctx.drawImage(costImage.canvas, 0, 0, course.width * TILE, course.height * TILE);
+    }
   }
   ctx.restore();
   ctx.restore(); // beginWorld
@@ -943,6 +1029,13 @@ function drawReveal() {
     ctx.arc((origin.x + 0.5) * TILE, (origin.y + 0.5) * TILE, Math.max(1, limit), 0, Math.PI * 2);
     ctx.clip();
   }
+  if (photoMode()) {
+    // the telestrator under-scrim: hue-on-hue dies on photography (green heat
+    // over green turf), so the photo dims a step inside the swept extent and
+    // the verdict paints on top with its contrast budget intact
+    ctx.fillStyle = 'rgba(8, 12, 10, 0.32)';
+    ctx.fillRect(0, 0, course.width * TILE, course.height * TILE);
+  }
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(reveal.heatCanvas, 0, 0, course.width * TILE, course.height * TILE);
@@ -956,10 +1049,16 @@ function drawReveal() {
     const { x: yx, y: yy } = toScreen(reveal.your);
     const k = 1 + (1 - easeOutCubic(yourT)) * 1.6; // punches in from large
     ctx.globalAlpha = yourT;
-    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(yx - 8 * k, yy - 8 * k); ctx.lineTo(yx + 8 * k, yy + 8 * k);
     ctx.moveTo(yx + 8 * k, yy - 8 * k); ctx.lineTo(yx - 8 * k, yy + 8 * k);
+    if (photoMode()) {
+      // cased stroke, the tracer trick: casing works harder on bright ground
+      ctx.strokeStyle = `rgba(6, 10, 8, ${0.35 + lumaAt(reveal.your.x, reveal.your.y) * 0.45})`;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    }
+    ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 3;
     ctx.stroke(); ctx.lineWidth = 1;
     ctx.globalAlpha = 1;
   }
@@ -967,8 +1066,15 @@ function drawReveal() {
     const { x: ox, y: oy } = toScreen(reveal.score.optimal);
     const e = easeOutCubic(optT);
     ctx.globalAlpha = optT;
+    ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2);
+    if (photoMode()) {
+      const opt = reveal.score.optimal;
+      ctx.strokeStyle = `rgba(6, 10, 8, ${0.35 + lumaAt(opt.x, opt.y) * 0.45})`;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+    }
     ctx.strokeStyle = '#6fd08c'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.stroke();
     ctx.fillStyle = '#6fd08c';
     ctx.beginPath(); ctx.arc(ox, oy, 3, 0, Math.PI * 2); ctx.fill();
     ctx.lineWidth = 1;
@@ -1320,6 +1426,12 @@ window.addEventListener('keydown', (e) => {
   } else if (k === 'g') {
     e.preventDefault();
     cycleHeatPage();
+  } else if (k === 'b' && photoGround) {
+    // photo ↔ paint, instantly: both grounds are one drawImage swap
+    e.preventDefault();
+    photoOn = !photoOn;
+    art = photoOn ? photoGround.canvas : paintedArt;
+    refresh();
   }
 });
 window.addEventListener('keyup', (e) => {
@@ -1958,6 +2070,21 @@ function startMajor() {
     { count: 5, label: copy.majorLabel(wk), hash: '#/major' });
 }
 
+/** A traced real hole comes home to the Caddie surface — Wave 2 of the
+ *  aerial verdict. One-hole round on the editor's patched course; the baked
+ *  photo (if this machine has it) becomes the ground. */
+function startTraced({ seed, biome, patchStr, photo, geo }) {
+  const b = ['classic', 'winter', 'alpine', 'links'].includes(biome) ? biome : 'classic';
+  // the editor's own base derivation, so the patch lands on identical ground
+  const patched = applyPatch(generateCourse(seed >>> 0, b), decodePatch(patchStr ?? ''));
+  startRound(seed >>> 0, false, {
+    count: 1,
+    label: copy.tracedLabel,
+    hash: location.hash, // keep the full traced URL, params and all
+    traced: { course: patched, geo, photo, photoKey: photoKey(seed >>> 0, b, patchStr ?? '') },
+  });
+}
+
 function startChampionship(seed = (Math.random() * 0xffffffff) >>> 0) {
   startRound(seed >>> 0, false,
     { count: 18, label: copy.champLabel(seed), hash: `#/champ/${seed}` });
@@ -2046,8 +2173,23 @@ if (riskStreak > 0 && !rival) toast(copy.streakNudge(riskStreak), 5200);
 
 const m = location.hash.match(/^#\/round\/(\d+)/);
 const mc = location.hash.match(/^#\/champ\/(\d+)/);
+const mt = location.hash.match(/^#\/traced\/(\d+)\/(\w+)/);
 // `#/gauntlet` is the weekly major's original, documented name — honor both
 if (location.hash.startsWith('#/major') || location.hash.startsWith('#/gauntlet')) startMajor();
+else if (mt) {
+  try {
+    const q = location.hash.indexOf('?');
+    const params = new URLSearchParams(q === -1 ? '' : location.hash.slice(q + 1));
+    let geo = null;
+    try { geo = params.get('geo') ? decodeGeoRef(params.get('geo')) : null; } catch { /* provenance only */ }
+    startTraced({
+      seed: Number(mt[1]), biome: mt[2],
+      patchStr: params.get('p'), photo: params.get('photo') === '1', geo,
+    });
+  } catch {
+    startRound(dailySeed(), true); // malformed trace: the daily is never wrong
+  }
+}
 else if (mc) startChampionship(Number(mc[1]));
 else if (m) startRound(Number(m[1]) >>> 0, false);
 else startRound(dailySeed(), true);

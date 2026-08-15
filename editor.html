@@ -29,7 +29,7 @@
   </nav>
 </header>
 <h1>Hole Editor</h1>
-<div class="sub">Load a hole, repaint the ground, certify it, share it as a URL. Tee and cup stay put. To trace a <b>real hole</b>: load an aerial image as an underlay, dial the ground back, and paint what you see — the image never leaves your machine and never ships with the course.</div>
+<div class="sub">Load a hole, repaint the ground, certify it, share it as a URL. Tee and cup stay put. To play a <b>real hole</b>: load an aerial image as an underlay, align it (zoom, rotate, move) so the real tee and cup sit on the anchors, then <b>Detect terrain</b> drafts the trace for you — correct what it got wrong, certify, share. The image never leaves your machine and never ships with the course.</div>
 <div id="bar" class="panel bar">
   <label>Seed <input id="seed" type="number" value="42" style="width:110px"></label>
   <select id="biome">
@@ -44,13 +44,28 @@
   <button id="certify">Certify</button>
   <button id="share" disabled>Copy challenge URL</button>
   <button id="play" disabled>Play it</button>
+  <button id="playCaddie" disabled title="Play this trace as a Caddie strategy hole — on its photo, if one is loaded">Play in Caddie</button>
   <span id="verdict"></span>
+</div>
+<div id="geobar" class="panel bar">
+  <span class="meta">Real hole? Pin it to Earth (optional):</span>
+  <label>Tee lat,lon <input id="geoTee" placeholder="34.0495, -118.5013" size="20" spellcheck="false"></label>
+  <label>Cup lat,lon <input id="geoCup" placeholder="34.0512, -118.4980" size="20" spellcheck="false"></label>
+  <span class="meta">two anchors fix scale, rotation and place — shares carry ~23 chars of coordinates, never imagery</span>
 </div>
 <div id="underlaybar" class="panel bar">
   <label>Aerial underlay <input id="underlay" type="file" accept="image/*"></label>
   <label id="tracectl" hidden>Ground opacity
     <input id="traceAlpha" type="range" min="15" max="100" value="45" style="width:140px">
   </label>
+  <label id="zoomctl" hidden>Zoom
+    <input id="uZoom" type="range" min="50" max="300" value="100" style="width:110px">
+  </label>
+  <label id="rotctl" hidden>Rotate
+    <input id="uRot" type="range" min="-180" max="180" value="0" style="width:110px">
+  </label>
+  <button id="uMove" hidden aria-pressed="false" title="Drag the photo instead of painting — line the tee and cup up with the real ones">Move photo</button>
+  <button id="detect" hidden title="Auto-classify the photo into terrain — a first draft to correct, then certify">Detect terrain</button>
   <button id="clearUnderlay" hidden>Remove underlay</button>
   <span class="meta" id="underlayNote"></span>
 </div>

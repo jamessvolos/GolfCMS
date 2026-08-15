@@ -49,6 +49,28 @@ python3 -m http.server 8000
 - **Creator mode** (`editor.html`): repaint any generated hole tile by tile,
   certify it with the solver, and share it as seed + patch in a URL. Tee and
   cup stay anchored; uncertifiable holes can't be shared.
+- **Real holes from aerial photos**: load a satellite or drone image as the
+  editor's underlay, align it (pan/zoom/rotate) so the real tee and cup sit
+  on the anchors, and **Detect terrain** (`src/engine/aerial.js`) drafts the
+  trace — HSV + texture classification per tile, modal smoothing, greens only
+  near the cup. Correct the draft, certify, share. The photo never leaves
+  your machine: a shared trace is a full-grid patch in the URL, never imagery.
+- **Play on the photo**: certifying a traced hole with the aerial loaded
+  bakes the aligned image into local storage (`src/ui/photo.js`), and both
+  play surfaces can then play that hole **on the photograph**. The arcade
+  fades tiles to a tracing layer at adjustable opacity; the Caddie surface
+  (`#/traced/<seed>/<biome>?p=…`) goes full broadcast — a two-pass cone that
+  reads on any exposure, a telestrator under-scrim beneath the reveal
+  heatmap, luma-adaptive cased markers, hazard-truth ink baked into the
+  ground, and `B` to flip photo ↔ paint instantly. Recipients without the
+  photo play the identical certified hole on painted tiles; the photo is a
+  private luxury, never in a URL. (Waves 1–2 of the aerial bake-off
+  verdict — see `docs/bakeoff-aerial/JUDGING.md`.)
+- **Pinned to Earth**: type the real tee and cup lat/lon in the editor and
+  the share carries a ~23-character georeference (`src/engine/georef.js`) —
+  two anchors fully determine scale, rotation, and place, so the HUD can say
+  "34.051°N 118.500°W" on any machine. Coordinates travel; imagery never
+  does. (Wave 3.)
 - **Difficulty stars**: every certified hole is rated 1–5★ from its
   certificate (par, lie, wind, biome), and the rating self-calibrates against
   your own recorded rounds ("plays harder than rated for you").

@@ -17,8 +17,36 @@ export function encodePatch(edits) {
   }).join('');
 }
 
+/**
+ * Full-grid patch: `g` + one hex nibble per cell, in row order. The escape
+ * hatch for traced holes — an aerial trace legitimately repaints most of the
+ * board, where the diff format's 400-edit cap (and its 4 chars per tile)
+ * stops making sense. At 960 cells the whole grid is 961 characters: still
+ * comfortably a URL.
+ */
+export function encodeGridPatch(cells) {
+  if (cells.length === 0 || cells.length > 4096) throw new Error(`bad grid size (${cells.length})`);
+  let out = 'g';
+  for (const t of cells) {
+    if (t < 0 || t >= TERRAIN_NAMES.length) throw new Error(`bad terrain ${t}`);
+    out += t.toString(16);
+  }
+  return out;
+}
+
 /** @returns {Array<{i: number, t: number}>} */
 export function decodePatch(str) {
+  if (/^g/i.test(str)) {
+    const body = str.slice(1);
+    if (!/^[0-9a-f]+$/i.test(body) || body.length > 4096) throw new Error('malformed grid patch');
+    const edits = [];
+    for (let i = 0; i < body.length; i++) {
+      const t = parseInt(body[i], 16);
+      if (t >= TERRAIN_NAMES.length) throw new Error('unknown terrain in patch');
+      edits.push({ i, t });
+    }
+    return edits;
+  }
   if (!/^([0-9a-f]{4})*$/i.test(str)) throw new Error('malformed patch string');
   if (str.length / 4 > MAX_EDITS) throw new Error('patch too large');
   const edits = [];
