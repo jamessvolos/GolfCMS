@@ -11,6 +11,7 @@ import { decodePatch, applyPatch } from '../engine/patch.js';
 import { solve } from '../engine/solver.js';
 import { estimateStars, starLabel, calibration } from '../engine/difficulty.js';
 import { initSound, play, setMuted, isMuted } from './sound.js';
+import { photoKey, loadPlayPhoto } from './photo.js';
 import { applyShot } from '../engine/game.js';
 import { CLUBS, lieRules } from '../engine/shots.js';
 import { cellAt } from '../engine/course.js';
@@ -65,6 +66,14 @@ function rewindOne(g) {
 }
 let ghost = null; // {positions, index, holed, strokes} while racing a replay
 let anim = null; // {from, to, t0} while the ball is in flight
+let photo = null; // {img, alpha} — the traced hole's baked aerial, when this machine has it
+
+/** Show/hide the ground-opacity control with the photo it governs. */
+function setPhoto(next) {
+  photo = next;
+  const ctl = document.getElementById('photoctl');
+  if (ctl) ctl.hidden = !next;
+}
 
 function loadFromHash() {
   const [h, query] = location.hash.split('?');
@@ -106,6 +115,25 @@ function loadFromHash() {
           custom: true,
         }, false);
         meta.textContent = `Custom hole · seed ${seed} · ${biome} · par ${solved ? solved.strokes : '?'}`;
+        // the trace's baked aerial, if this machine has it: the photo ground.
+        // Key mismatch or absence loads nothing — tile-only is the fallback.
+        if (params.get('photo')) {
+          const key = photoKey(seed, biome, patchStr);
+          loadPlayPhoto(key).then((rec) => {
+            if (!rec || puzzle?.seed !== seed) return;
+            const img = new Image();
+            img.onload = () => {
+              let alpha = 0.45;
+              try { alpha = Number(localStorage.getItem('golfcms.photo.alpha')) || 0.45; } catch { /* default */ }
+              setPhoto({ img, alpha });
+              const slider = document.getElementById('photoAlpha');
+              if (slider) slider.value = Math.round(alpha * 100);
+              meta.textContent += ' · on its photo';
+              refresh();
+            };
+            img.src = URL.createObjectURL(rec.blob);
+          });
+        }
       } catch {
         startPuzzle(makePuzzle(Number(holeMatch[1]) >>> 0, difficulty, biome), false);
       }
@@ -139,6 +167,7 @@ function loadRoundHole() {
   isDaily = false;
   ghost = null;
   anim = null;
+  setPhoto(null);
   game = freshGame(p);
   aim = null;
   recorded = false;
@@ -155,6 +184,7 @@ function startPuzzle(p, daily) {
   round = null;
   ghost = null;
   anim = null;
+  setPhoto(null); // a new hole never inherits the last trace's ground
   puzzle = p;
   isDaily = daily;
   game = freshGame(p);
@@ -179,7 +209,7 @@ function refresh() {
   window.__game = game; // debug/test hook: read-only view of live state
   window.__debugShot = (shot) => { takeShot(shot); };
   updateHud();
-  draw(ctx, puzzle.course, game, anim ? null : aim, { ghost });
+  draw(ctx, puzzle.course, game, anim ? null : aim, { ghost, photo });
   if (!anim && game.holed) showResult();
 }
 
@@ -217,7 +247,7 @@ function stepAnim(now) {
     x: anim.from.x + (anim.to.x - anim.from.x) * ease,
     y: anim.from.y + (anim.to.y - anim.from.y) * ease,
   };
-  draw(ctx, puzzle.course, game, null, { ghost, ballPos });
+  draw(ctx, puzzle.course, game, null, { ghost, photo, ballPos });
   if (t < 1) {
     requestAnimationFrame(stepAnim);
   } else {
@@ -496,6 +526,13 @@ muteBtn.textContent = isMuted() ? '🔇' : '🔊';
 muteBtn.addEventListener('click', () => {
   setMuted(!isMuted());
   muteBtn.textContent = isMuted() ? '🔇' : '🔊';
+});
+
+document.getElementById('photoAlpha')?.addEventListener('input', (e) => {
+  if (!photo) return;
+  photo.alpha = Number(e.target.value) / 100;
+  try { localStorage.setItem('golfcms.photo.alpha', String(photo.alpha)); } catch { /* best-effort */ }
+  refresh();
 });
 
 window.addEventListener('hashchange', loadFromHash);

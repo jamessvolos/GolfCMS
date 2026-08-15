@@ -55,6 +55,14 @@ python3 -m http.server 8000
   trace — HSV + texture classification per tile, modal smoothing, greens only
   near the cup. Correct the draft, certify, share. The photo never leaves
   your machine: a shared trace is a full-grid patch in the URL, never imagery.
+- **Play on the photo**: certifying a traced hole with the aerial loaded
+  bakes the aligned image into local storage (`src/ui/photo.js`), and the
+  arcade then plays that hole **on the photograph** — tiles as a tracing
+  layer at adjustable opacity, water and sand inked with hazard-truth
+  outlines so the physics is always the loudest line. Recipients without
+  the photo play the identical certified hole on painted tiles; the photo
+  is a private luxury, never in a URL. (Wave 1 of the aerial bake-off
+  verdict — see `docs/bakeoff-aerial/JUDGING.md`.)
 - **Difficulty stars**: every certified hole is rated 1–5★ from its
   certificate (par, lie, wind, biome), and the rating self-calibrates against
   your own recorded rounds ("plays harder than rated for you").

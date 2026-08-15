@@ -33,11 +33,53 @@ function drawSlopeArrow(ctx, x, y, dir) {
   ctx.fill();
 }
 
+/** Halftone & Turf's truth clamp, mandated by the bake-off verdict: in photo
+ *  mode, wherever the picture and the physics might disagree, the physics is
+ *  inked on top — hazard boundaries as cased strokes the photo can't argue
+ *  with. The player always sees the line where the engine starts charging. */
+function strokeHazardTruth(ctx, course) {
+  const at = (x, y) =>
+    x < 0 || y < 0 || x >= course.width || y >= course.height ? -1 : cellAt(course, x, y);
+  const edges = (match) => {
+    ctx.beginPath();
+    for (let y = 0; y < course.height; y++) {
+      for (let x = 0; x < course.width; x++) {
+        if (!match(at(x, y))) continue;
+        const X = x * TILE;
+        const Y = y * TILE;
+        if (!match(at(x, y - 1))) { ctx.moveTo(X, Y); ctx.lineTo(X + TILE, Y); }
+        if (!match(at(x, y + 1))) { ctx.moveTo(X, Y + TILE); ctx.lineTo(X + TILE, Y + TILE); }
+        if (!match(at(x - 1, y))) { ctx.moveTo(X, Y); ctx.lineTo(X, Y + TILE); }
+        if (!match(at(x + 1, y))) { ctx.moveTo(X + TILE, Y); ctx.lineTo(X + TILE, Y + TILE); }
+      }
+    }
+  };
+  const ink = (match, casing, color) => {
+    edges(match);
+    ctx.strokeStyle = casing;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  };
+  ink((t) => t === WATER, 'rgba(0, 20, 40, 0.7)', 'rgba(140, 220, 255, 0.9)');
+  ink((t) => t === SAND, 'rgba(60, 40, 0, 0.6)', 'rgba(255, 235, 180, 0.9)');
+  ctx.lineWidth = 1;
+}
+
 export function draw(ctx, course, game, aim, opts = {}) {
   const ballPos = opts.ballPos ?? game.ball;
   const { width, height } = course;
   ctx.canvas.width = width * TILE;
   ctx.canvas.height = height * TILE;
+
+  // photo ground: the baked aerial is the ground and the tiles become the
+  // tracing layer over it, the editor's own alpha discipline carried into play
+  if (opts.photo) {
+    ctx.drawImage(opts.photo.img, 0, 0);
+    ctx.globalAlpha = opts.photo.alpha;
+  }
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -73,6 +115,11 @@ export function draw(ctx, course, game, aim, opts = {}) {
       }
     }
   }
+
+  // instruments from here down render at full alpha, exactly as tee and cup
+  // punch through the editor's trace — the ground fades, the game never does
+  ctx.globalAlpha = 1;
+  if (opts.photo) strokeHazardTruth(ctx, course);
 
   // landing preview: shaded band of possible landing tiles
   if (aim && aim.preview) {

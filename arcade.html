@@ -33,6 +33,10 @@
 <h1>Arcade</h1>
 <div class="sub">The original quick-play game. Aim with mouse or arrow keys; click or Space to swing.</div>
 <div id="meta">loading…</div>
+<!-- photo ground: only appears when a traced hole arrives with its baked aerial -->
+<label id="photoctl" hidden style="font-size:13px;color:var(--dim)">Ground opacity
+  <input id="photoAlpha" type="range" min="15" max="100" value="45" style="width:140px;vertical-align:middle">
+</label>
 <div id="wrap">
   <canvas id="course" width="960" height="576"></canvas>
   <div id="toast" class="toast"><div class="big"></div><div class="sub"></div>

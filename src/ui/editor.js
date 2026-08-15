@@ -7,6 +7,7 @@ import { TERRAIN_NAMES, FAIRWAY, ROUGH, SAND, WATER, TREES, GREEN, ICE, SLOPE_N,
 import { solve } from '../engine/solver.js';
 import { diffCourses, encodePatch, encodeGridPatch } from '../engine/patch.js';
 import { detectTerrain } from '../engine/aerial.js';
+import { photoKey, savePlayPhoto } from './photo.js';
 import { terrainColor } from './render.js';
 
 const PALETTE = [
@@ -255,18 +256,42 @@ document.getElementById('certify').addEventListener('click', () => {
     // diff, so there is no ceiling on how much of the board a trace repaints
     verdict.textContent = `✓ certified · par ${solved.strokes} · ${edits.length} edits` +
       (edits.length > 400 ? ' · full-grid share' : '');
+    // certified with an aerial loaded: park the baked ground for the arcade
+    if (underlay) bakePlayPhoto().catch(() => { /* storage blocked: photo is a bonus */ });
     document.getElementById('share').disabled = false;
     document.getElementById('play').disabled = false;
   }, 10);
 });
 
-function challengeUrl() {
+function currentPatchStr() {
   const edits = diffCourses(base, course);
-  const patch = edits.length > 400 ? encodeGridPatch(course.cells) : encodePatch(edits);
+  return edits.length > 400 ? encodeGridPatch(course.cells) : encodePatch(edits);
+}
+
+function challengeUrl() {
+  const patch = currentPatchStr();
   // the #/hole route lives in the ARCADE — index.html is the Caddie surface
-  // and would silently fall back to its daily
+  // and would silently fall back to its daily. `photo=1` tells the arcade a
+  // baked ground may be waiting in IndexedDB; the URL itself stays imagery-free.
   return `${location.origin}${location.pathname.replace(/editor\.html$/, 'arcade.html')}` +
-    `#/hole/${base.seed}/standard/${base.biome}${patch ? `?p=${patch}` : ''}`;
+    `#/hole/${base.seed}/standard/${base.biome}` +
+    (patch ? `?p=${patch}${underlay ? '&photo=1' : ''}` : '');
+}
+
+/** The Thin Coat handoff: bake the aligned photo once at world resolution and
+ *  park it for the arcade. One image across one page boundary — never a URL. */
+async function bakePlayPhoto() {
+  const off = document.createElement('canvas');
+  off.width = canvas.width;
+  off.height = canvas.height;
+  drawUnderlayTo(off.getContext('2d'));
+  const blob = await new Promise((r) => off.toBlob(r, 'image/jpeg', 0.85));
+  if (!blob) return;
+  await savePlayPhoto(photoKey(base.seed, base.biome, currentPatchStr()), {
+    blob,
+    align: { k: underlay.k, uZoom, uRot, uPan }, // provenance for a future re-edit
+    savedAt: Date.now(),
+  });
 }
 
 document.getElementById('share').addEventListener('click', () => {
