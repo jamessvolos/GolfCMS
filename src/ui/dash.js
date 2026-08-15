@@ -1,6 +1,9 @@
 // Career dashboard — reads the caddie decision log and tells the strokes-gained story.
+import { abSummary } from '../engine/experiment.js';
+
 const KEY = 'golfcms.caddie.log.v1';
 const CAL_KEY = 'golfcms.calibration.v1';
+const AB_KEY = 'golfcms.aerial.ab.v1';
 const app = document.getElementById('app');
 
 const COL = { line: '#6fd08c', avg: '#ffd166', dim: '#9db8a5', bad: '#e07070' };
@@ -288,6 +291,25 @@ function hcpSplit(log) {
   return sec;
 }
 
+/** The photo-ground experiment: traced rounds alternate photo/paint, and this
+ *  panel is where the data gets its say — before any more aerial spend. */
+function photoExperiment() {
+  let entries = [];
+  try { entries = JSON.parse(localStorage.getItem(AB_KEY)) ?? []; } catch { return null; }
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const s = abSummary(entries);
+  const sec = el('section');
+  sec.innerHTML = '<h2>The photo-ground experiment</h2>';
+  const arm = (a) => a.n ? `${fmt(a.avgPts, 0)} pts/hole over ${a.n} round${a.n === 1 ? '' : 's'}` : 'no rounds yet';
+  sec.append(el('p', '',
+    `Traced holes alternate between their photo and painted tiles. ` +
+    `<b>Photo:</b> ${arm(s.photo)} · <b>Paint:</b> ${arm(s.paint)} · ` +
+    `kept the photo ${s.rounds ? Math.round((s.keptPhoto / s.rounds) * 100) : 0}% of the time` +
+    `${s.overrides ? ` (${s.overrides} B-toggle override${s.overrides === 1 ? '' : 's'})` : ''}.`));
+  sec.append(el('p', '', `<b>Verdict:</b> ${esc(s.verdict)}`));
+  return sec;
+}
+
 function emptyState() {
   const sec = el('section');
   sec.id = 'empty';
@@ -309,6 +331,8 @@ function render() {
   app.append(roundsTable(log));
   const split = hcpSplit(log);
   if (split) app.append(split);
+  const ab = photoExperiment();
+  if (ab) app.append(ab);
 }
 
 window.__dash = { render };
