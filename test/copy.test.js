@@ -37,3 +37,16 @@ test('phaseTip has a line for every phase and fails closed', () => {
 test('nextDailyIn embeds the clock it is handed', () => {
   assert.match(copy.nextDailyIn('07:41:12'), /07:41:12/);
 });
+
+test('challengerResult calls win, tie, and loss with the scores in voice order', () => {
+  assert.match(copy.challengerResult(4200, 3900), /4200–3900/);
+  assert.match(copy.challengerResult(4200, 3900), /🏆/);
+  assert.match(copy.challengerResult(4000, 4000), /Dead heat/);
+  assert.match(copy.challengerResult(3900, 4200), /4200–3900/); // challenger's number first
+  assert.doesNotMatch(copy.challengerResult(3900, 4200), /🏆/);
+});
+
+test('streak lines carry the day count', () => {
+  assert.match(copy.streakNudge(12), /12-day/);
+  assert.match(copy.streakChip(12), /🔥 12/);
+});

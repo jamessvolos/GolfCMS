@@ -38,6 +38,8 @@ const modeSel = document.getElementById('mode');
 
 let round = null; // {seed, daily, holeIndex, holes: [{points, strokes}], totalPoints}
 let countdownTimer = null; // ticks the "next daily in…" clock on the round overlay
+let rival = null; // a challenge link's card to beat: {seed, holes: [pts], total}
+let riskStreak = 0; // days of daily streak that die at UTC midnight if today goes unplayed
 let course = null;
 let V = null;
 let costImage = null; // release E: V as greyscale, one pixel per tile, cached per hole
@@ -701,6 +703,8 @@ function loadHole() {
       // the caddie says both out loud
       green: course.green ? copy.greenNote(course.green.archetype, course.pin?.name) : null,
     });
+    // the streak that dies at midnight rides the ticker until today's daily is in
+    if (round.daily && riskStreak > 0) meta.textContent += copy.streakChip(riskStreak);
     verdict.textContent = copy.firstAim(yards(toPin(ball)));
     document.getElementById('pattern').textContent = '';
     if (touchMode) initNeutralAim();
@@ -1638,9 +1642,26 @@ function recordDailyStreak() {
     const have = new Set(dates);
     let streak = 0;
     for (let t = Date.parse(today); have.has(new Date(t).toISOString().slice(0, 10)); t -= 86400000) streak += 1;
+    riskStreak = 0; // today is in the book: nothing on the line until tomorrow
     return streak;
   } catch {
     return 0; // storage blocked: no streak, no drama
+  }
+}
+
+/** Days of streak that end at UTC midnight if today's daily goes unplayed:
+ *  0 when today is already recorded (or there is no streak to lose). */
+function streakAtRisk() {
+  try {
+    const data = JSON.parse(localStorage.getItem('golfcms.caddie.streak.v1')) ?? {};
+    const have = new Set(Array.isArray(data.dates) ? data.dates : []);
+    const today = new Date().toISOString().slice(0, 10);
+    if (have.has(today)) return 0;
+    let n = 0;
+    for (let t = Date.parse(today) - 86400000; have.has(new Date(t).toISOString().slice(0, 10)); t -= 86400000) n += 1;
+    return n;
+  } catch {
+    return 0;
   }
 }
 
@@ -1704,6 +1725,13 @@ function finishHole() {
     ? copy.roundSub(round.count, copy.roundGrade(round.totalPoints / (round.count * 1000)))
       + (round.streak > 1 ? ` · 🔥 ${round.streak}` : '')
     : holeLine;
+  // a challenger's card rides along: their points on this hole, the verdict at the end
+  if (rival && rival.seed === round.seed) {
+    const sub = overlay.querySelector('.sub');
+    if (done) sub.textContent += ` · ${copy.challengerResult(round.totalPoints, rival.total)}`;
+    else if (rival.holes[round.holeIndex] != null) sub.textContent += copy.challengerHole(rival.holes[round.holeIndex]);
+  }
+  document.getElementById('ov-chal').hidden = !(done && /^https?:$/.test(location.protocol));
   document.getElementById('ov-next').textContent = done ? copy.newRound : copy.nextHole;
   const coach = document.getElementById('coach');
   if (done) {
@@ -1803,19 +1831,18 @@ function shareText() {
 /** Copy with a visible receipt: async clipboard first, the textarea trick as
  *  fallback (plain-http and older WebViews), and a toast either way. */
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms = 2200) {
   const t = document.getElementById('toast');
   if (!t) return;
   t.textContent = msg;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
-async function copyResult() {
-  const text = shareText();
+async function copyText(text, okMsg) {
   try {
     await navigator.clipboard.writeText(text);
-    toast(copy.copiedToast);
+    toast(okMsg);
     return;
   } catch { /* fall through to the legacy path */ }
   try {
@@ -1827,10 +1854,18 @@ async function copyResult() {
     ta.select();
     const ok = document.execCommand('copy');
     ta.remove();
-    toast(ok ? copy.copiedToast : copy.copyFailedToast);
+    toast(ok ? okMsg : copy.copyFailedToast);
   } catch {
     toast(copy.copyFailedToast);
   }
+}
+const copyResult = () => copyText(shareText(), copy.copiedToast);
+
+/** The challenge link: the same holes plus `?vs=` — the sharer's per-hole
+ *  points. Whoever opens it plays against that card, no backend anywhere. */
+function challengeUrl() {
+  const hash = round.count === 18 && round.hash ? round.hash : `#/round/${round.seed}`;
+  return `${location.origin}${location.pathname}${hash}?vs=${round.holes.map((h) => h.points).join('.')}`;
 }
 
 document.getElementById('ov-next').addEventListener('click', () => {
@@ -1844,6 +1879,7 @@ document.getElementById('ov-next').addEventListener('click', () => {
 });
 document.getElementById('ov-share').addEventListener('click', copyResult);
 document.getElementById('share').addEventListener('click', copyResult);
+document.getElementById('ov-chal').addEventListener('click', () => copyText(challengeUrl(), copy.challengeToast));
 document.getElementById('ov-quick').addEventListener('click', () => {
   clearInterval(countdownTimer);
   startRound((Math.random() * 0xffffffff) >>> 0, false);
@@ -1948,6 +1984,7 @@ mygameBtn.addEventListener('click', () => {
 document.getElementById('hit').textContent = copy.hitIt;
 document.getElementById('commit').textContent = copy.playOn;
 document.getElementById('ov-share').textContent = copy.copyResult;
+document.getElementById('ov-chal').textContent = copy.challenge;
 
 // first-run onboarding: three cards, dismissible, never shown again
 {
@@ -1983,6 +2020,29 @@ document.getElementById('ov-share').textContent = copy.copyResult;
 try {
   navigator.serviceWorker?.register('sw.js');
 } catch { /* offline support is a bonus, never a requirement */ }
+
+// A challenge link freezes the sharer's card as the target: `?vs=` after a
+// round route carries their per-hole points. Parse it before routing rewrites
+// the hash; the card only counts while the seeds match.
+{
+  const q = location.hash.indexOf('?');
+  const seedM = location.hash.match(/^#\/(?:round|champ)\/(\d+)/);
+  if (q !== -1 && seedM) {
+    const vs = new URLSearchParams(location.hash.slice(q + 1)).get('vs');
+    if (vs && /^\d+(\.\d+)*$/.test(vs)) {
+      const holes = vs.split('.').map(Number).filter((n) => n >= 0 && n <= 1000);
+      if (holes.length) {
+        rival = { seed: Number(seedM[1]) >>> 0, holes, total: holes.reduce((a, b) => a + b, 0) };
+        toast(copy.challengerStart(rival.total), 5200);
+      }
+    }
+  }
+}
+
+// The nudge that guards the ritual: if a daily streak dies at UTC midnight,
+// say so once out loud (and keep a chip on the ticker until today's is in).
+riskStreak = streakAtRisk();
+if (riskStreak > 0 && !rival) toast(copy.streakNudge(riskStreak), 5200);
 
 const m = location.hash.match(/^#\/round\/(\d+)/);
 const mc = location.hash.match(/^#\/champ\/(\d+)/);

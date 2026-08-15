@@ -173,6 +173,20 @@ export const copy = {
   copiedToast: 'Result copied — paste it anywhere.',
   copyFailedToast: 'Couldn’t reach the clipboard — long-press to copy.',
 
+  // ---- challenge: freeze this round as a card to beat ----
+  challenge: 'Challenge ➜',
+  challengeToast: 'Challenge link copied — they play your holes, your card is the target.',
+  challengerStart: (total) => `A challenger set the target: ${total} pts over these holes.`,
+  challengerHole: (pts) => ` · challenger: ${pts} pts`,
+  challengerResult: (you, them) =>
+    you > them ? `You took the challenge, ${you}–${them} 🏆`
+    : you === them ? `Dead heat, ${you}–${them} — rematch?`
+    : `The challenger holds it, ${them}–${you}`,
+
+  // ---- streak at risk: the nudge that guards the ritual ----
+  streakNudge: (n) => `🔥 ${n}-day streak on the line — today's hole keeps it alive.`,
+  streakChip: (n) => ` · 🔥 ${n} on the line`,
+
   // ---- the daily ritual: next tee time ----
   nextDailyIn: (hms) => `Next daily hole in ${hms} · same hole, everyone on Earth.`,
   quickFive: 'Quick 5',
