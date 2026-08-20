@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="GeoGuessr for golf strategy: pick targets on a daily generated hole and get scored in strokes gained against the optimal caddie line.">
+<meta name="theme-color" content="#10241a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Caddie">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Caddie — the daily golf strategy game">
+<meta property="og:description" content="You don't swing — you pick targets. Every decision scored in strokes gained against the optimal line. New certified hole every day.">
+<meta property="og:url" content="https://jamessvolos.github.io/GolfCMS/">
+<meta property="og:image" content="https://jamessvolos.github.io/GolfCMS/icons/icon-512.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Caddie — the daily golf strategy game">
+<meta name="twitter:description" content="Pick targets, get scored in strokes gained. New certified hole every day.">
+<meta name="twitter:image" content="https://jamessvolos.github.io/GolfCMS/icons/icon-512.png">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🎯</text></svg>">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<title>Caddie — Play</title>
+<link rel="stylesheet" href="styles/system.css">
+<link rel="stylesheet" href="styles/cockpit.css">
+</head>
+<body>
+
+<!-- Layer 0: the course, full-bleed. Everything else floats over it. -->
+<div id="wrap">
+  <canvas id="course" width="960" height="576"></canvas>
+</div>
+
+<!-- the arrival: hole title card shown over the green while the camera holds
+     there, before easing back down the fairway to the tee -->
+<div id="holecard" hidden>
+  <div class="hc-kicker"></div>
+  <div class="hc-title"></div>
+  <div class="hc-sub"></div>
+</div>
+
+<!-- hole/round result — body-level so it commands the whole cockpit -->
+<div id="overlay" class="overlay">
+  <div class="ov-card glass">
+    <div class="big"></div>
+    <div class="sub"></div>
+    <div id="coach" hidden></div>
+    <div id="ov-countdown" hidden></div>
+    <div class="bar"><button id="ov-share">Copy result</button><button id="ov-chal" hidden>Challenge</button><button id="ov-quick" hidden>Quick 5</button><button id="ov-next" class="btn-primary">Next</button></div>
+  </div>
+</div>
+
+<!-- Layer 1: risk-reactive ambience — the screen itself feels the danger -->
+<div id="vignette" aria-hidden="true"></div>
+
+<!-- Layer 2: the stamped verdict, slammed down near the ball on reveal -->
+<div id="stamp" hidden aria-hidden="true">
+  <div id="stamp-word"></div>
+  <div id="stamp-chip" class="glass"></div>
+</div>
+
+<!-- HUD top-left: the one number that matters -->
+<div id="hud-yardage" class="hud" aria-live="off">
+  <span class="eyebrow">Yds to pin</span>
+  <span id="topin">–</span>
+  <div id="score" class="glass">Shot – · 0 pts</div>
+  <div id="cam-controls" class="glass">
+    <button id="peek" aria-pressed="false"
+      title="Overview — see the whole hole. Hold O for a glance, tap O to keep it. On touch: pinch out.">Overview</button>
+    <button id="recenter" aria-label="Recenter the camera"
+      title="Recenter on the shot (R, or double-tap the course). Wheel or pinch to zoom.">◎</button>
+    <button id="greenpage" title="Green page (G)">Break</button>
+  </div>
+</div>
+
+<!-- HUD top-right: hole identity ticker + compact settings -->
+<div id="hud-ticker" class="hud">
+  <div id="meta" class="glass">Reading the hole…</div>
+  <div id="hud-settings" class="glass">
+    <button id="share" title="Copy your round result">Share</button>
+    <button id="pro" title="Hide odds and dots — pure judgment">Pro</button>
+    <details id="help-pop">
+      <summary title="What do the numbers mean?" aria-label="What do the numbers mean?">?</summary>
+      <div class="menu glass" id="help-body">
+        <span class="menu-label">Reading the numbers</span>
+        <p><b>SG (strokes gained)</b> — how much your target cost against the caddie's best line. SG −0.30 means that aim gives up about a third of a stroke.</p>
+        <p><b>E</b> — expected strokes to hole out from here. "E 3.99 vs caddie 3.02" compares your line's forecast to the optimal one.</p>
+        <p><b>The ellipse</b> — your real dispersion: the ball lands somewhere inside it. Rough, sand and trees widen it.</p>
+        <p><b>The ring</b> — after each shot, the caddie's optimal target. Green ground on the reveal was smart, red was costly.</p>
+      </div>
+    </details>
+    <label class="hcp">HCP <select id="handicap"></select></label>
+    <details id="nav-more">
+      <summary title="Career and workshop">☰</summary>
+      <nav class="menu glass">
+        <a href="stats.html">Career</a>
+        <span class="menu-label">Workshop</span>
+        <a href="arcade.html">Arcade</a>
+        <a href="editor.html">Editor</a>
+        <a href="cms.html">CMS</a>
+        <a href="audit.html">Audit</a>
+        <a href="ab.html">Blind test</a>
+        <a href="playtest.html">Playtest</a>
+      </nav>
+    </details>
+  </div>
+</div>
+
+<!-- HUD bottom-center: the caddie's voice -->
+<div id="caddie-line" class="hud glass"><span id="verdict">Reading the hole…</span> <span id="pattern"></span></div>
+
+<!-- HUD bottom-left: play dock -->
+<div id="dock-play" class="hud glass">
+  <span class="label">Round</span>
+  <select id="mode" title="Pick a round to play">
+    <option value="daily" selected>Daily</option>
+    <option value="quick">Quick 5</option>
+    <option value="major">Weekly Major</option>
+    <option value="champ">Championship 18</option>
+    <option value="real">Real hole</option>
+  </select>
+  <button id="mygame" aria-expanded="false" aria-controls="custom-panel">My game</button>
+</div>
+
+<!-- HUD bottom-right: the primary action -->
+<div id="dock-primary" class="hud">
+  <button id="commit" hidden>Play on ➜</button>
+  <button id="hit" hidden>Hit it ➜</button>
+</div>
+
+<div id="custom-panel" class="hud glass" hidden>
+  <label>Pattern width <input id="c-width" type="range" min="0.6" max="2" step="0.05" value="1.2"></label>
+  <label>Long-club blowup <input id="c-long" type="range" min="0" max="1" step="0.05" value="0.3"></label>
+  <label>Miss bias L/R <input id="c-bias" type="range" min="-1.5" max="1.5" step="0.1" value="0"></label>
+  <label>Driver distance <input id="c-dist" type="range" min="0.78" max="1.12" step="0.02" value="1"></label>
+  <label>Leaderboard URL <input id="c-board" type="url" placeholder="https://… (optional)" spellcheck="false"></label>
+  <button id="custom-apply">Apply my pattern</button>
+</div>
+
+<!-- one-line toast: clipboard + small confirmations -->
+<div id="toast" class="glass" hidden role="status" aria-live="polite"></div>
+
+<!-- first-reveal explainer: what SG means, shown once -->
+<div id="sg-explain" class="hud glass" hidden>
+  <p id="sg-explain-body"></p>
+  <button id="sg-explain-ok" class="btn-primary">Got it</button>
+</div>
+
+<div id="onboard" hidden>
+  <div class="ob-card glass">
+    <div id="ob-step" class="label">Step 1 of 3</div>
+    <h2 id="ob-title"></h2>
+    <p id="ob-body"></p>
+    <div class="bar"><button id="ob-skip">Skip</button><button id="ob-next" class="btn-primary">Next</button></div>
+  </div>
+</div>
+
+<script type="module" src="src/ui/caddie.js"></script>
+</body>
+</html>

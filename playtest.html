@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🔬</text></svg>">
+<title>Caddie — Playtest Kit</title>
+<link rel="stylesheet" href="styles/system.css">
+<style>
+  body { display: flex; flex-direction: column; align-items: center; }
+  main { width: 100%; max-width: 720px; }
+  textarea { width: 100%; min-height: 96px; background: rgba(0,0,0,0.25); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; font: inherit; resize: vertical; }
+  #invite-text { min-height: 130px; font-size: 13px; }
+  .task { display: flex; gap: 10px; align-items: flex-start; margin: var(--sp-3) 0; }
+  .task input[type="checkbox"] { margin-top: 3px; accent-color: var(--accent2); }
+  .task .what { font-weight: 600; }
+  .task .watch { color: var(--dim); font-size: 13px; }
+  .form-grid { display: grid; gap: var(--sp-3); }
+  .form-grid label { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+  .form-grid input[type="text"] { width: 100%; }
+  .hint { color: var(--dim); font-size: var(--fs-caption); }
+  #copied { color: var(--accent2); font-size: 13px; min-width: 4em; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html">Blind test</a>
+      <a href="playtest.html" aria-current="page">Playtest</a>
+    </span>
+  </nav>
+</header>
+<main>
+  <h1>Playtest Kit</h1>
+  <div class="sub">Everything you need to host a playtest: the invite, the watch-script, and a feedback form that files straight to GitHub.</div>
+
+  <section id="invite">
+    <h2>1 · Invite a player</h2>
+    <p class="hint">Copy-ready — today's Daily and this week's Major are filled in automatically.</p>
+    <textarea id="invite-text" readonly></textarea>
+    <div class="bar" style="margin-top: var(--sp-2)">
+      <button id="copy-invite" class="btn-primary">Copy invite</button>
+      <span id="copied" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section id="watch">
+    <h2>2 · Watch, don't coach</h2>
+    <p class="hint">Hand over the game and say nothing. Tick each task as you observe it — resist explaining until the debrief.</p>
+    <label class="task"><input type="checkbox" id="t1"><span><span class="what">First touch.</span><br><span class="watch">They open the game cold. Do they find that moving the pointer aims a shot within ~30 seconds, without help?</span></span></label>
+    <label class="task"><input type="checkbox" id="t2"><span><span class="what">Aim.</span><br><span class="watch">While aiming, do they read the ellipse and dots as a dispersion pattern ("my miss could go here") or as a cursor? Listen for what they say out loud.</span></span></label>
+    <label class="task"><input type="checkbox" id="t3"><span><span class="what">Commit.</span><br><span class="watch">First committed shot. Do they understand the ball flew to a sample from the pattern — not to the exact spot they aimed at?</span></span></label>
+    <label class="task"><input type="checkbox" id="t4"><span><span class="what">Reveal comprehension.</span><br><span class="watch">After the first reveal, ask: "what is the green/red map telling you?" Note their answer verbatim.</span></span></label>
+    <label class="task"><input type="checkbox" id="t5"><span><span class="what">Second hole.</span><br><span class="watch">Do they change how they choose targets based on hole one's verdicts — clubbing down, aiming away from trouble — or repeat the same lines?</span></span></label>
+  </section>
+
+  <section id="feedback">
+    <h2>3 · File the feedback</h2>
+    <div class="form-grid">
+      <label>Player (initials or nickname) <input type="text" id="f-player" placeholder="e.g. J.S., 12-hcp golfer"></label>
+      <label>Device
+        <select id="f-device">
+          <option>Phone</option>
+          <option>Laptop</option>
+          <option>Tablet</option>
+        </select>
+      </label>
+      <label>Tasks passed (of the 5 above) — auto-counted from the checklist <input type="text" id="f-tasks" readonly></label>
+      <label>What confused them <textarea id="f-confusion" placeholder="Moments of hesitation, misreads, wrong mental models…"></textarea></label>
+      <label>Best quote <input type="text" id="f-quote" placeholder="Their words, verbatim"></label>
+      <label>Would they play tomorrow?
+        <select id="f-return">
+          <option>Yes</option>
+          <option>Maybe</option>
+          <option>No</option>
+        </select>
+      </label>
+      <label>Anything else <textarea id="f-notes"></textarea></label>
+    </div>
+    <div class="bar" style="margin-top: var(--sp-3)">
+      <a id="issue-link" class="cta" href="#" target="_blank" rel="noopener">File GitHub issue</a>
+      <button id="copy-issue">Copy issue text</button>
+      <span id="issue-copied" aria-live="polite"></span>
+    </div>
+    <p class="hint">The button opens a pre-filled issue on github.com/jamessvolos/GolfCMS. No GitHub account handy? Copy the text and send it to the host.</p>
+  </section>
+</main>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
+<script type="module" src="src/ui/playtest.js"></script>
+</body>
+</html>

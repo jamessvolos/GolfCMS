@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🎭</text></svg>">
+<title>Caddie — Blind Test</title>
+<link rel="stylesheet" href="styles/system.css">
+<style>
+  body { display: flex; flex-direction: column; align-items: center; }
+  #quiz, #results { max-width: 680px; width: 100%; padding: 14px; }
+  #progress { color: var(--dim); margin-bottom: var(--sp-2); }
+  .row { display: flex; gap: 10px; margin-top: var(--sp-3); justify-content: center; }
+  .big { font-size: 30px; font-weight: 700; }
+  .pass { color: var(--accent2); }
+  .fail { color: var(--bad); }
+  #best { color: var(--accent); margin-top: var(--sp-2); }
+  #breakdown { list-style: none; padding: 0; margin: var(--sp-3) 0 0; color: var(--dim); font-size: var(--fs-caption); columns: 2; }
+  #breakdown .right { color: var(--accent2); }
+  #breakdown .wrong { color: var(--bad); }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html" aria-current="page">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Blind Test</h1>
+<div class="sub">Twelve holes, shuffled — six drawn by hand, six by the generator. Call each one.</div>
+<div class="sub">Hosting a <a href="playtest.html">playtest</a>? Run this with your guest — fresh eyes make the best judges.</div>
+<div id="quiz" class="panel">
+  <div id="progress"></div>
+  <canvas id="thumb"></canvas>
+  <div class="row">
+    <button id="say-authored">Authored</button>
+    <button id="say-generated">Generated</button>
+  </div>
+</div>
+<div id="results" class="panel" hidden>
+  <div id="verdict"></div>
+  <div id="best"></div>
+  <ol id="breakdown"></ol>
+  <div class="row"><button id="again">Play again</button></div>
+</div>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
+<script type="module" src="src/ui/ab.js"></script>
+</body>
+</html>

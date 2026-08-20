@@ -1,0 +1,6 @@
+# The certification sweep's working directory: per-shard seed lists and logs.
+# The OUTPUT (src/engine/certified.js) is committed; the scratch that produced
+# it is not — scripts/certify-seeds.mjs rebuilds it from scratch on demand.
+scratch-certified/
+
+node_modules/

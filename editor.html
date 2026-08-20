@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🛠️</text></svg>">
+<title>Caddie — Hole Editor</title>
+<link rel="stylesheet" href="styles/system.css">
+<style>
+  body { display: flex; flex-direction: column; align-items: center; }
+  #board { cursor: crosshair; }
+  #verdict { font-weight: 600; color: var(--accent); min-width: 200px; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html" aria-current="page">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Hole Editor</h1>
+<div class="sub">Load a hole, repaint the ground, certify it, share it as a URL. Tee and cup stay put. To play a <b>real hole</b>: load an aerial image as an underlay, align it (zoom, rotate, move) so the real tee and cup sit on the anchors, then <b>Detect terrain</b> drafts the trace for you — correct what it got wrong, certify, share. The image never leaves your machine and never ships with the course.</div>
+<div id="bar" class="panel bar">
+  <label>Seed <input id="seed" type="number" value="42" style="width:110px"></label>
+  <select id="biome">
+    <option value="classic" selected>classic</option>
+    <option value="winter">winter</option>
+    <option value="alpine">alpine</option>
+    <option value="links">links</option>
+  </select>
+  <button id="load">Load</button>
+  <button id="random">Random</button>
+  <button id="reset">Reset edits</button>
+  <button id="certify">Certify</button>
+  <button id="share" disabled>Copy challenge URL</button>
+  <button id="play" disabled>Play it</button>
+  <button id="playCaddie" disabled title="Play this trace as a Caddie strategy hole — on its photo, if one is loaded">Play in Caddie</button>
+  <span id="verdict"></span>
+</div>
+<div id="geobar" class="panel bar">
+  <span class="meta">Real hole? Pin it to Earth (optional):</span>
+  <label>Tee lat,lon <input id="geoTee" placeholder="34.0495, -118.5013" size="20" spellcheck="false"></label>
+  <label>Cup lat,lon <input id="geoCup" placeholder="34.0512, -118.4980" size="20" spellcheck="false"></label>
+  <button id="fetchImagery" title="Fetch satellite imagery for these coordinates as the tracing underlay — Mapbox with your token (global), USGS NAIP without one (US)">Fetch imagery</button>
+  <label>Imagery token <input id="imgToken" placeholder="pk.… (Mapbox, optional)" size="22" spellcheck="false"></label>
+  <span class="meta">two anchors fix scale, rotation and place — shares carry ~23 chars of coordinates, never imagery. Your token stays in this browser.</span>
+</div>
+<div id="underlaybar" class="panel bar">
+  <label>Aerial underlay <input id="underlay" type="file" accept="image/*"></label>
+  <label id="tracectl" hidden>Ground opacity
+    <input id="traceAlpha" type="range" min="15" max="100" value="45" style="width:140px">
+  </label>
+  <label id="zoomctl" hidden>Zoom
+    <input id="uZoom" type="range" min="50" max="300" value="100" style="width:110px">
+  </label>
+  <label id="rotctl" hidden>Rotate
+    <input id="uRot" type="range" min="-180" max="180" value="0" style="width:110px">
+  </label>
+  <button id="uMove" hidden aria-pressed="false" title="Drag the photo instead of painting — line the tee and cup up with the real ones">Move photo</button>
+  <button id="detect" hidden title="Auto-classify the photo into terrain — a first draft to correct, then certify">Detect terrain</button>
+  <button id="clearUnderlay" hidden>Remove underlay</button>
+  <span class="meta" id="underlayNote"></span>
+</div>
+<div id="palette" class="panel bar"></div>
+<canvas id="board" width="960" height="576"></canvas>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
+<script type="module" src="src/ui/editor.js"></script>
+</body>
+</html>

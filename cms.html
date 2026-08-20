@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🗂️</text></svg>">
+<title>Caddie — Puzzle Catalog</title>
+<link rel="stylesheet" href="styles/system.css">
+<style>
+  .actions button { padding: 3px 8px; font-size: 12px; }
+  #empty { color: var(--dim); padding: var(--sp-6); text-align: center; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html" aria-current="page">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Puzzle Catalog</h1>
+<div class="sub">Generate candidates, play them, approve the keepers. Records live in your browser; export to share.</div>
+<div id="controls" class="panel bar">
+  <label>Batch <input id="count" type="number" value="12" min="1" max="60" style="width:60px"></label>
+  <select id="difficulty">
+    <option value="standard" selected>standard</option>
+    <option value="easy">easy</option>
+    <option value="rude">rude</option>
+  </select>
+  <select id="biomeSel">
+    <option value="classic" selected>classic</option>
+    <option value="winter">winter</option>
+    <option value="alpine">alpine</option>
+    <option value="links">links</option>
+  </select>
+  <button id="generate">Generate candidates</button>
+  <select id="filter">
+    <option value="all" selected>all statuses</option>
+    <option value="generated">generated</option>
+    <option value="approved">approved</option>
+    <option value="rejected">rejected</option>
+  </select>
+  <button id="export">Export JSON</button>
+  <button id="import">Import JSON</button>
+  <input id="importFile" type="file" accept="application/json" hidden>
+  <label>Redeem code <input id="redeem" placeholder="GLF-XXXX-XXXX-S" style="width:150px"></label>
+  <span id="status" class="meta"></span>
+</div>
+<div id="grid" class="grid-cards"></div>
+<div id="empty" hidden>No puzzles yet — generate a batch above.</div>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
+<script type="module" src="src/ui/cms.js"></script>
+</body>
+</html>

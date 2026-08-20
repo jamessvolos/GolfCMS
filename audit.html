@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🔍</text></svg>">
+<title>Caddie — Generator Audit</title>
+<link rel="stylesheet" href="styles/system.css">
+<style>
+  #grid { --card-min: 220px; gap: var(--sp-2); }
+  #grid.greens { --card-min: 300px; }
+  #grid.strategy { --card-min: 340px; }
+  .cell { background: var(--panel); border-radius: 8px; padding: 6px; }
+  .cell canvas { width: 100%; border-radius: 4px; cursor: pointer; }
+  .cell .meta { margin-top: 4px; font-size: 11px; }
+  .green-cell .meta { line-height: 1.45; }
+  .green-cell .dim { opacity: 0.62; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html" aria-current="page">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Generator Audit</h1>
+<div class="sub">Fifty seeds at a glance — a fast check for blandness or broken layouts. Click any hole to play it. Switch to <b>Greens</b> for a sheet of twenty-four green complexes at putting resolution, or <b>Strategy</b> to see release D's carry bands, lay-ups and shelves drawn over the routing.</div>
+<div id="controls" class="panel bar">
+  <select id="mode">
+    <option value="courses" selected>Courses (50)</option>
+    <option value="greens">Greens (24)</option>
+    <option value="strategy">Strategy (24)</option>
+  </select>
+  <select id="biome">
+    <option value="classic" selected>classic</option>
+    <option value="winter">winter</option>
+    <option value="alpine">alpine</option>
+    <option value="links">links</option>
+  </select>
+  <button id="reroll">Reroll 50</button>
+  <span id="info" class="meta"></span>
+</div>
+<div id="grid" class="grid-cards"></div>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
+<script type="module" src="src/ui/audit.js"></script>
+</body>
+</html>

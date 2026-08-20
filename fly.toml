@@ -1,0 +1,27 @@
+# Fly.io config for the GolfCMS leaderboard.
+# Deploy: fly launch --copy-config --no-deploy && fly deploy
+# For persistent boards: fly volumes create boards -s 1 && uncomment [mounts].
+app = "golfcms-leaderboard"
+primary_region = "iad"
+
+[build]
+  # Uses the Dockerfile at the repo root.
+
+[env]
+  # Uncomment with a mounted volume to persist boards across restarts:
+  # GOLFCMS_BOARD_FILE = "/data/boards.json"
+
+# [mounts]
+#   source = "boards"
+#   destination = "/data"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

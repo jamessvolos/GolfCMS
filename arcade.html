@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>⛳</text></svg>">
+<title>Caddie — Arcade</title>
+<link rel="stylesheet" href="styles/system.css">
+<style>
+  body { display: flex; flex-direction: column; align-items: center; padding: 12px 16px; }
+  #meta { color: var(--dim); font-size: 13px; margin-bottom: var(--sp-2); }
+  #wrap { position: relative; max-width: 100%; }
+  #course { cursor: crosshair; height: auto; }
+  #hud { margin-top: 10px; margin-bottom: 0; }
+  #score { font-weight: 600; min-width: 130px; }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <a class="wordmark" href="index.html">Caddie 🎯</a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="stats.html">Career</a>
+    <span class="nav-group"><span class="nav-label">Workshop</span>
+      <a href="arcade.html" aria-current="page">Arcade</a>
+      <a href="editor.html">Editor</a>
+      <a href="cms.html">CMS</a>
+      <a href="audit.html">Audit</a>
+      <a href="ab.html">Blind test</a>
+    </span>
+  </nav>
+</header>
+<h1>Arcade</h1>
+<div class="sub">The original quick-play game. Aim with mouse or arrow keys; click or Space to swing.</div>
+<div id="meta">loading…</div>
+<!-- photo ground: only appears when a traced hole arrives with its baked aerial -->
+<label id="photoctl" hidden style="font-size:13px;color:var(--dim)">Ground opacity
+  <input id="photoAlpha" type="range" min="15" max="100" value="45" style="width:140px;vertical-align:middle">
+</label>
+<div id="wrap">
+  <canvas id="course" width="960" height="576"></canvas>
+  <div id="toast" class="toast"><div class="big"></div><div class="sub"></div>
+    <div style="display:flex;gap:8px">
+      <button id="toast-share">Copy result</button>
+      <button id="toast-challenge" hidden>Challenge link</button>
+      <button id="toast-next" hidden>Next hole</button>
+    </div>
+  </div>
+</div>
+<div id="hud" class="panel bar">
+  <span id="score">Par – · Strokes 0</span>
+  <span class="group"><span class="label">Club</span>
+    <button data-club="driver">Driver</button>
+    <button data-club="iron" class="active">Iron</button>
+    <button data-club="wedge">Wedge</button>
+    <button data-club="putter">Putter</button>
+  </span>
+  <span class="group"><span class="label">Power</span>
+    <button data-power="1">1</button>
+    <button data-power="2" class="active">2</button>
+    <button data-power="3">3</button>
+  </span>
+  <span class="group">
+    <button id="undo">Undo</button>
+    <button id="daily">Daily</button>
+    <select id="biome" title="Biome for new holes">
+      <option value="classic" selected>classic</option>
+      <option value="winter">winter</option>
+      <option value="alpine">alpine</option>
+      <option value="links">links</option>
+    </select>
+    <button id="new">New hole</button>
+    <button id="newround">New round</button>
+    <button id="gauntlet">Gauntlet</button>
+    <button id="mute" title="Toggle sound">🔊</button>
+    <button id="share">Share link</button>
+  </span>
+</div>
+<footer class="app-footer">Caddie — a GolfCMS product</footer>
+<script type="module" src="src/ui/main.js"></script>
+</body>
+</html>
