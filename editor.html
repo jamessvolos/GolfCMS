@@ -51,7 +51,9 @@
   <span class="meta">Real hole? Pin it to Earth (optional):</span>
   <label>Tee lat,lon <input id="geoTee" placeholder="34.0495, -118.5013" size="20" spellcheck="false"></label>
   <label>Cup lat,lon <input id="geoCup" placeholder="34.0512, -118.4980" size="20" spellcheck="false"></label>
-  <span class="meta">two anchors fix scale, rotation and place — shares carry ~23 chars of coordinates, never imagery</span>
+  <button id="fetchImagery" title="Fetch satellite imagery for these coordinates as the tracing underlay — Mapbox with your token (global), USGS NAIP without one (US)">Fetch imagery</button>
+  <label>Imagery token <input id="imgToken" placeholder="pk.… (Mapbox, optional)" size="22" spellcheck="false"></label>
+  <span class="meta">two anchors fix scale, rotation and place — shares carry ~23 chars of coordinates, never imagery. Your token stays in this browser.</span>
 </div>
 <div id="underlaybar" class="panel bar">
   <label>Aerial underlay <input id="underlay" type="file" accept="image/*"></label>

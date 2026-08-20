@@ -12,6 +12,8 @@ import { decodePatch, applyPatch } from '../engine/patch.js';
 import { generateCourse } from '../engine/generate.js';
 import { decodeGeoRef, formatGeo } from '../engine/georef.js';
 import { photoKey, loadPlayPhoto } from './photo.js';
+import { fetchSatelliteGround } from './satellite.js';
+import { abAssign } from '../engine/experiment.js';
 import { strokeHazardTruth } from './render.js';
 import { dailySeed, dailyNumber } from '../engine/puzzle.js';
 import { weekKey, gauntletSeed } from '../engine/gauntlet.js';
@@ -49,6 +51,7 @@ let photoGround = null; // {canvas, luma} — a traced hole's baked aerial, when
 let paintedArt = null; // the painter's ground, kept so B can swap instantly
 let photoOn = true; // B toggles photo ↔ paint; the game underneath never changes
 const photoMode = () => Boolean(photoGround && photoOn);
+const AB_KEY = 'golfcms.aerial.ab.v1'; // the photo-ground experiment's ledger
 let course = null;
 let V = null;
 let costImage = null; // release E: V as greyscale, one pixel per tile, cached per hole
@@ -687,6 +690,7 @@ function syncModeSelect() {
   modeSel.value = round.daily ? 'daily'
     : round.count === 18 ? 'champ'
     : round.hash === '#/major' ? 'major'
+    : round.hash === '#/real' ? 'real'
     : 'quick';
 }
 
@@ -717,6 +721,19 @@ function loadHole() {
     art = renderCourseArt(course);
     paintedArt = art;
     photoGround = null;
+    if (round.traced?.geo && !round.traced.photo) {
+      // a georeferenced hole with no local photo fetches its REAL ground —
+      // satellite imagery composed under the board, Shot-Scope style. The
+      // Real Nine carry geo, so the daily real hole arrives on real earth.
+      const geoRef = round.traced.geo;
+      fetchSatelliteGround(geoRef, course).then((sat) => {
+        if (!sat || round?.traced?.geo !== geoRef) return; // hole moved on, or no imagery
+        photoGround = bakePhotoGround(sat.canvas);
+        meta.textContent += ` · imagery ${sat.attribution}`;
+        if (photoOn) art = photoGround.canvas;
+        refresh();
+      });
+    }
     if (round.traced?.photo) {
       const key = round.traced.photoKey;
       loadPlayPhoto(key).then((rec) => {
@@ -725,7 +742,15 @@ function loadHole() {
         img.onload = () => {
           if (round?.traced?.photoKey !== key) return;
           photoGround = bakePhotoGround(img);
-          if (photoOn) art = photoGround.canvas;
+          // the experiment assigns the ground (Thin Coat's gate): traced
+          // rounds alternate photo/paint so both arms accumulate. B still
+          // overrides — and the override is itself the preference signal.
+          let n = 0;
+          try { n = (JSON.parse(localStorage.getItem(AB_KEY)) ?? []).length; } catch { /* fresh */ }
+          round.traced.abGround = abAssign(n);
+          round.traced.abOverrode = false;
+          photoOn = round.traced.abGround === 'photo';
+          art = photoOn ? photoGround.canvas : paintedArt;
           refresh();
         };
         img.src = URL.createObjectURL(rec.blob);
@@ -778,6 +803,7 @@ function loadHole() {
     if (round.daily && riskStreak > 0) meta.textContent += copy.streakChip(riskStreak);
     // a georeferenced trace says where on Earth it is — provenance, never physics
     if (round.traced?.geo) meta.textContent += ` · ${formatGeo(round.traced.geo)}`;
+    if (round.traced?.note) meta.textContent += ` · ${round.traced.note}`;
     verdict.textContent = copy.firstAim(yards(toPin(ball)));
     document.getElementById('pattern').textContent = '';
     if (touchMode) initNeutralAim();
@@ -1430,6 +1456,7 @@ window.addEventListener('keydown', (e) => {
     // photo ↔ paint, instantly: both grounds are one drawImage swap
     e.preventDefault();
     photoOn = !photoOn;
+    if (round?.traced?.abGround) round.traced.abOverrode = true;
     art = photoOn ? photoGround.canvas : paintedArt;
     refresh();
   }
@@ -1819,6 +1846,20 @@ function finishHole() {
   phase = 'holeover';
   const done = round.holeIndex + 1 >= round.count;
   if (done && round.daily) round.streak = recordDailyStreak();
+  // the photo experiment logs a finished traced round — but only when a photo
+  // was genuinely available, so the paint arm is a choice, not an accident
+  if (done && round.traced?.abGround && photoGround) {
+    try {
+      const log = JSON.parse(localStorage.getItem(AB_KEY)) ?? [];
+      log.push({
+        at: Date.now(), ground: round.traced.abGround,
+        overrode: round.traced.abOverrode, keptPhoto: photoOn,
+        points: round.totalPoints, holes: round.count,
+      });
+      if (log.length > 200) log.splice(0, log.length - 200);
+      localStorage.setItem(AB_KEY, JSON.stringify(log));
+    } catch { /* storage blocked: the experiment is best-effort */ }
+  }
   overlay.querySelector('.big').textContent = done
     ? copy.roundScore(round.label ?? copy.genericRoundLabel, round.totalPoints, round.count * 1000)
     : copy.holeScore(round.holeIndex + 1, holePts);
@@ -2085,6 +2126,30 @@ function startTraced({ seed, biome, patchStr, photo, geo }) {
   });
 }
 
+/** The real nine: a static pack of solver-certified tribute holes, one
+ *  featured per day. The daily is a file — no backend, no imagery, just
+ *  seed + patch + a georeference saying where the original lives. */
+async function startRealHole() {
+  try {
+    const res = await fetch('packs/real-9.json');
+    const pack = await res.json();
+    const idx = ((dailyNumber() % pack.holes.length) + pack.holes.length) % pack.holes.length;
+    const h = pack.holes[idx];
+    // the pack's base regenerates with the same hole-length override it was
+    // authored on — dist is part of the hole's identity, like the seed
+    const course = applyPatch(
+      generateCourse(h.seed >>> 0, h.biome, { holeDistTiles: h.dist }), decodePatch(h.patch));
+    let geo = null;
+    try { geo = decodeGeoRef(h.geo); } catch { /* provenance only, never fatal */ }
+    startRound(h.seed >>> 0, false, {
+      count: 1, label: h.name, hash: '#/real',
+      traced: { course, geo, note: h.tribute, photo: false, photoKey: null },
+    });
+  } catch {
+    startRound(dailySeed(), true); // pack unreachable: the daily is never wrong
+  }
+}
+
 function startChampionship(seed = (Math.random() * 0xffffffff) >>> 0) {
   startRound(seed >>> 0, false,
     { count: 18, label: copy.champLabel(seed), hash: `#/champ/${seed}` });
@@ -2096,6 +2161,7 @@ modeSel.addEventListener('change', () => {
   if (v === 'daily') startRound(dailySeed(), true);
   else if (v === 'major') startMajor();
   else if (v === 'champ') startChampionship();
+  else if (v === 'real') startRealHole();
   else startRound((Math.random() * 0xffffffff) >>> 0, false);
 });
 
@@ -2176,6 +2242,7 @@ const mc = location.hash.match(/^#\/champ\/(\d+)/);
 const mt = location.hash.match(/^#\/traced\/(\d+)\/(\w+)/);
 // `#/gauntlet` is the weekly major's original, documented name — honor both
 if (location.hash.startsWith('#/major') || location.hash.startsWith('#/gauntlet')) startMajor();
+else if (location.hash.startsWith('#/real')) startRealHole();
 else if (mt) {
   try {
     const q = location.hash.indexOf('?');
